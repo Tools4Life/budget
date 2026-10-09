@@ -369,6 +369,10 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
   .deskonly{display:block}
 }
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* no double-tap zoom (pinch-to-zoom still works); no auto-zoom when tapping into a field on iPhone */
+html{touch-action:manipulation}
+@media (pointer:coarse){input,select,textarea{font-size:max(16px,1em)}}
 </style>
 </head>
 <body>
