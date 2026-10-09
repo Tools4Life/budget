@@ -352,6 +352,22 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 .gate .err{color:var(--warn);text-align:center;font-weight:600;font-size:.9rem;min-height:1.2em}
 .gate .lnk{border:0;background:none;color:var(--accent);font-weight:600;padding:6px}
 .gate .gmark{width:64px;height:64px;border-radius:18px;background:var(--accent);color:#fff;display:grid;place-items:center;margin:0 auto;font-size:2rem;font-weight:800}
+.deskonly{display:none}
+@media (min-width:1024px){
+  #v-home .pagepad{max-width:1180px}
+  #homeBody{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(320px,1fr);gap:32px;align-items:start;padding-top:24px}
+  #homeBody .hright>h2:first-child,#homeBody .hright>.nudge:first-child{margin-top:0}
+  #homeBody .hero{padding:22px 24px}
+  #homeBody .hero .big{font-size:3.4rem}
+  #homeBody .rings.strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px;overflow:visible;margin:0;padding:0}
+  #homeBody .rings.strip .ringcard{flex:none}
+  #homeBody .ring,#homeBody .ring svg{width:78px;height:78px}
+  #homeBody .ring .ctr b{font-size:1rem}
+  #homeBody .ringcard .nm{font-size:.86rem}
+  #homeBody .ringcard .of{font-size:.78rem}
+  #homeBody .ringcard .pace{font-size:.74rem}
+  .deskonly{display:block}
+}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 </style>
 </head>
@@ -689,7 +705,7 @@ function renderHome(){
   let html;
   if (r.hasIncome){
     const used = r.available > 0 ? Math.min(1, r.spent / r.available) : 1;
-    html = `<div class="hero ${r.left<0?"neg":""}">
+    html = `<div class="hcol hleft"><div class="hero ${r.left<0?"neg":""}">
       <div class="lbl">${r.left<0 ? "Over allowance for " + mo : "Allowance left in " + mo}</div>
       <div class="big">${r.left<0 ? "−"+whole(-r.left) : whole(r.left)}</div>
       <div class="meter"><i style="width:${(used*100).toFixed(1)}%"></i></div>
@@ -697,7 +713,7 @@ function renderHome(){
       ${addBtnHtml()}
     </div>`;
   } else {
-    html = `<div class="hero">
+    html = `<div class="hcol hleft"><div class="hero">
       <div class="lbl">Allowance left in ${mo}</div>
       <div class="big" style="font-size:2rem">Add your income</div>
       <div class="fine">Enter your monthly take-home pay so bills and savings come out first. Then this shows what's left for everything else.</div>
@@ -716,12 +732,22 @@ function renderHome(){
       <div class="nm">${esc(k.name)}</div>
       <div class="of">of ${whole(k.limit)}</div>${fast ? `<div class="pace">Pace ${whole(proj)}</div>` : ""}</button>`;
   }).join("") + `</div>`;
-  html += upNextHtml(c, mo);
+  html += `</div><div class="hcol hright">` + upNextHtml(c, mo) + deskAccountsHtml(c) + `</div>`;
   $("homeBody").innerHTML = html;
   fitHome();
 }
 /* Keep Home to one screen: drop Due this week rows from the bottom until it fits, with a "more" link to Bills. */
+const WIDE = window.matchMedia("(min-width:1024px)");
+WIDE.addEventListener && WIDE.addEventListener("change", () => { if (state.view === "home") renderHome(); });
+function deskAccountsHtml(c){
+  const list = (c.accounts||[]).filter(a => a.balance || a.type === "checking");
+  if (!list.length) return "";
+  const lbl = a => DEBT.has(a.type) ? "owed" : a.type === "reimb" ? "owed to you" : "";
+  return `<div class="deskonly"><h2>Accounts <small><button class="sharebtn" data-goto="accounts">Open</button></small></h2><div class="list">` + list.map(a =>
+    `<button class="row" data-goto="accounts"><span class="ebub emoji" style="box-shadow:inset 3px 0 0 ${esc(acctColor(a))}">${esc(a.emoji)}</span><div class="grow"><div class="t">${esc(a.name)}</div><div class="m">${a.updated ? "Updated " + new Date(a.updated).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : ""}</div></div><span class="v">${money(a.balance)}${lbl(a) ? ` <small style="color:var(--muted);font-weight:500">${lbl(a)}</small>` : ""}</span></button>`).join("") + `</div></div>`;
+}
 function fitHome(){
+  if (WIDE.matches){ const b = $("homeBody"); b.classList.remove("tight"); b.querySelectorAll(".row[data-due]").forEach(r => r.hidden = false); const m = b.querySelector("[data-more]"); if (m) m.remove(); return; }
   const body = $("homeBody"), list = body.querySelector(".upnext");
   if (!list || !body.offsetParent) return;
   const rows = Array.from(list.querySelectorAll(".row[data-due]"));
