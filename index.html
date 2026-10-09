@@ -284,7 +284,7 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .hint{color:var(--muted);font-size:.86rem;margin:10px 2px 0}
 .fhelp{color:var(--muted);font-size:.8rem;margin:5px 2px 0}
-.bmark{width:34px;height:34px;border-radius:10px;background:var(--accent);color:#fff;display:grid;place-items:center;flex:none}
+.bmark{width:34px;height:34px;border-radius:8px;display:block;flex:none}
 .bmark svg{width:20px;height:20px}
 .pgbar{position:sticky;top:calc(57px + env(safe-area-inset-top,0px));z-index:4;margin:-4px -2px 12px;padding:10px 14px;border-radius:16px;background:var(--good);color:#fff;display:flex;justify-content:space-between;align-items:center;font-weight:700;box-shadow:0 6px 16px rgba(16,24,40,.12)}
 .pgbar.neg{background:var(--warn)}
@@ -351,7 +351,7 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 .gate p{margin:0;text-align:center;color:var(--muted);font-size:.95rem}
 .gate .err{color:var(--warn);text-align:center;font-weight:600;font-size:.9rem;min-height:1.2em}
 .gate .lnk{border:0;background:none;color:var(--accent);font-weight:600;padding:6px}
-.gate .gmark{width:64px;height:64px;border-radius:18px;background:var(--accent);color:#fff;display:grid;place-items:center;margin:0 auto;font-size:2rem;font-weight:800}
+.gate .gmark{width:64px;height:64px;border-radius:15px;display:block;margin:0 auto}
 .deskonly{display:none}
 @media (min-width:1024px){
   #v-home .pagepad{max-width:1180px}
@@ -374,7 +374,7 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 <body>
 <div class="app" id="app">
   <nav class="nav" id="nav" aria-label="Sections">
-    <div class="brand"><span class="bmark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><path d="M4 7.5V17a2 2 0 0 0 2 2h13a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H6.5A2.5 2.5 0 0 1 4 7.5z"/><circle cx="16" cy="13.5" r="1.3" fill="currentColor" stroke="none"/></svg></span>Budget Tracker</div>
+    <div class="brand"><img class="bmark" src="wallet-192.png" alt="" aria-hidden="true">Budget Tracker</div>
     <div id="navlist"></div>
     <div class="navfoot" id="modeNote"></div>
   </nav>
@@ -423,7 +423,7 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 <div class="toast" id="toast" role="status"></div>
 <div class="gate" id="gate" hidden>
   <form id="gateForm" novalidate>
-    <div class="gmark" aria-hidden="true"><svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><path d="M4 7.5V17a2 2 0 0 0 2 2h13a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H6.5A2.5 2.5 0 0 1 4 7.5z"/><circle cx="16" cy="13.5" r="1.3" fill="currentColor" stroke="none"/></svg></div>
+    <img class="gmark" src="wallet-192.png" alt="" aria-hidden="true">
     <h1>Budget Tracker</h1>
     <p id="gMsg">Sign in with the same email and password you use for Ops Hub.</p>
     <input class="finput" id="gEmail" type="email" autocomplete="email" placeholder="Email">
