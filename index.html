@@ -628,7 +628,7 @@ function normBank(b){
   b = b || {};
   const rules = Object.assign({}, b.rules);
   ["authorized on","authorized","purchase authorized","return authorized","on"].forEach(k => delete rules[k]);  // learned from bank boilerplate before cleanDesc existed
-  return {from: b.from || "", links: Object.assign({}, b.links), names: Object.assign({}, b.names), rules, lastSync: b.lastSync || 0};
+  return {from: b.from || "", links: Object.assign({}, b.links), names: Object.assign({}, b.names), rules, tally: Object.assign({}, b.tally), lastSync: b.lastSync || 0};
 }
 
 const NOW = monthKey(new Date());
@@ -1357,7 +1357,14 @@ function xpayView(id){
     extra:`<div class="card"><div class="sum"><span>Paid down</span><b>${esc(acctName(c, x.to))}${x.planName ? " · " + esc(x.planName) : ""}</b></div><div class="sum"><span>From</span><b>${esc(acctName(c, x.from))}</b></div><div class="sum"><span>In allowance</span><b>${x.budget===false ? "No" : "Yes"}</b></div><div class="sum total"><span>Amount</span><b>${money(x.amt)}</b></div></div>`,
     saveLabel:"Done", onSave: () => {},
     deleteLabel:"Undo this payment",
-    onDelete: () => { editCfg(c => { moveBal(c, x.from, -x.amt); moveBal(c, x.to, x.amt); if (x.payoff){ const pb = c.bills.find(b=>b.id===x.plan); if (pb) pb.end = x.prevEnd || ""; } c.payments = c.payments.filter(y=>y.id!==x.id); }); toast("Payment removed. Balances reversed."); }
+    onDelete: async () => {
+      if (x.bank){
+        const ln = new Set(Object.values(cfg().bank.links).filter(Boolean));
+        editCfg(c => { if (!ln.has(x.from)) moveBal(c, x.from, -x.amt); if (!ln.has(x.to)) moveBal(c, x.to, x.amt); c.payments = c.payments.filter(y=>y.id!==x.id); });
+        const b = await store.bankGet(x.bank); if (b) store.bankSet(b, {status:"new"});
+        return toast("Payment removed and sent back to Review.");
+      }
+      editCfg(c => { moveBal(c, x.from, -x.amt); moveBal(c, x.to, x.amt); if (x.payoff){ const pb = c.bills.find(b=>b.id===x.plan); if (pb) pb.end = x.prevEnd || ""; } c.payments = c.payments.filter(y=>y.id!==x.id); }); toast("Payment removed. Balances reversed."); }
   });
 }
 function depForm(id){
@@ -1974,6 +1981,18 @@ function bankAuto(){
   bankSync(false);
 }
 
+/* Learning: tally every choice per store and suggest the one picked most often. Ties go to the most recent pick.
+   prev (when re-filing from Activity) takes one vote back from the old choice. */
+const GENERIC_WORDS = new Set(["credit","card","cards","loan","gold","bank","account","payment","visa","platinum","rewards","checking","savings"]);
+function learn(y, key, v, prev){
+  if (!key) return;
+  const t = Object.assign({}, y.bank.tally[key]);
+  if (!Object.keys(t).length && y.bank.rules[key]) t[y.bank.rules[key]] = 1;   // stores learned before tallies existed
+  if (prev && t[prev]) { t[prev]--; if (!t[prev]) delete t[prev]; }
+  t[v] = (t[v] || 0) + 1;
+  let best = v; Object.entries(t).forEach(([k, n]) => { if (n > t[best]) best = k; });
+  y.bank.tally[key] = t; y.bank.rules[key] = best;
+}
 /* A hand-entered purchase that looks like this bank item: same amount, same card (or none), within 4 days. */
 function bankMatch(b, used){
   if (b.amt <= 0) return null;
@@ -2001,10 +2020,10 @@ function bankChoices(c, b, m, bill){
   const billCh = bill ? [{v:"bill:"+bill.pid, e:"📅", n:bill.name, act:true}] : [];
   // Paying a card or loan the bank feed doesn't cover (Affirm, Klarna...): lowers what you owe there.
   const linked = new Set(Object.values(c.bank.links).filter(Boolean)), from = c.accounts.find(a=>a.id===b.acct);
-  const payable = b.amt > 0 && (!from || !DEBT.has(from.type)) ? c.accounts.filter(a => DEBT.has(a.type) && !linked.has(a.id)) : [];
+  const payable = b.amt > 0 && (!from || !DEBT.has(from.type)) ? c.accounts.filter(a => DEBT.has(a.type)) : [];
   const payCh = payable.map(a => ({v:"pay:"+a.id, e:"💸", n:"Paid " + a.name, act:true}));
   const raw = String(b.desc||"").toLowerCase();
-  const payHit = payable.find(a => { const nm = a.name.toLowerCase(); return (/affirm/.test(nm) && /\baff\s?\*|affirm/.test(raw)) || nm.split(/[^a-z0-9]+/).some(w => w.length >= 4 && raw.includes(w)); });
+  const payHit = payable.find(a => { const nm = a.name.toLowerCase(); return (/affirm/.test(nm) && /\baff\s?\*|affirm/.test(raw)) || nm.split(/[^a-z0-9]+/).some(w => w.length >= 4 && !GENERIC_WORDS.has(w) && raw.includes(w)); });
   let list = b.amt < 0 ? [skip].concat(cats) : billCh.concat(payCh, [skip, work], cats);
   // No rule yet: card payments and transfers look alike at every bank, so put Transfer first for them.
   const looksMove = /\b(payment|pmt|autopay|auto pay|epay|e-payment|transfer|xfer|thank you|zelle to|to savings|from savings)\b/i.test(b.desc);
@@ -2024,10 +2043,10 @@ function bankResolve(b, choice, quiet){
     editCfg(y => {
       if (!linked.has(to)) moveBal(y, to, -b.amt);   // the checking side is already in the bank balance
       y.payments = [{id:b.id, ts:bankTs(b), from:b.acct, to, plan:"", planName:"", payoff:false, prevEnd:"", amt:b.amt, note:"From bank", budget:false, bank:b.id}].concat(y.payments||[]).slice(0,60);
-      if (key) y.bank.rules[key] = "@pay:" + to;
+      learn(y, key, "@pay:" + to);
     });
     store.bankSet(b, {status:"pay", to, done:Date.now()});
-    toast(`${money(b.amt)} paid to ${ta.name}. ${ta.name} now ${money(balOf(cfg(), to))}. Not counted as spending.`);
+    toast(`${money(b.amt)} paid to ${ta.name}.${linked.has(to) ? " Saved to Card payments; the balance comes from the bank." : " " + ta.name + " now " + money(balOf(cfg(), to)) + "."} Not counted as spending.`);
     return;
   }
   if (choice.startsWith("bill:")){
@@ -2040,14 +2059,14 @@ function bankResolve(b, choice, quiet){
       store.setPaid(map);
     }
     // A bill that pays down a card or loan the bank feed doesn't cover (an Affirm plan, say): lower what you owe there.
-    editCfg(y => { if (key) y.bank.rules[key] = "@bill"; if (x && x.cardOf && x.cardOf !== b.acct && !linked.has(x.cardOf)) moveBal(y, x.cardOf, -b.amt); });
+    editCfg(y => { learn(y, key, "@bill"); if (x && x.cardOf && x.cardOf !== b.acct && !linked.has(x.cardOf)) moveBal(y, x.cardOf, -b.amt); });
     store.bankSet(b, {status:"bill", bill:pid, done:Date.now()});
     toast(x ? `${x.name} marked paid${x.varies ? " at " + money(b.amt) : ""}. Your allowance isn't touched.` : "Filed as a bill.");
     return;
   }
   if (choice.startsWith("dup:")){ store.bankSet(b, {status:"dup", match:choice.slice(4), done:Date.now()}); toast("Got it. You already logged that one."); return; }
   if (choice === "skip"){
-    editCfg(x => { if (key) x.bank.rules[key] = "@skip"; });
+    editCfg(x => learn(x, key, "@skip"));
     store.bankSet(b, {status:"skipped", done:Date.now()});
     toast(b.amt < 0 ? "Left out of the budget. Balances still come from the bank." : "Skipped. Transfers and card payments don't count as spending.");
     return;
@@ -2057,7 +2076,7 @@ function bankResolve(b, choice, quiet){
   if (!k) return;
   const t = {id:b.id, amt:b.amt, cat:k.id, catName:k.name, note:niceDesc(b.desc), acct:c.accounts.find(a=>a.id===b.acct) ? b.acct : "", ts:bankTs(b), month:monthKey(new Date(bankTs(b))), work, bank:b.id};
   let after = null;
-  editCfg(x => { if (work) applyTx(x, t, 1); if (key) x.bank.rules[key] = work ? "@work" : k.id; after = x; });
+  editCfg(x => { if (work) applyTx(x, t, 1); learn(x, key, work ? "@work" : k.id); after = x; });
   if (t.month === NOW) store.addTx(t); else store.addOther(t);
   store.bankSet(b, {status:"done", done:Date.now()});
   if (work) return toast(`${money(t.amt)} work expense. Horizon owes you ${money(ensureHz(after).balance)}. Budget untouched.`);
@@ -2078,7 +2097,7 @@ function bankTxForm(t){
     onSave: v => {
       const k = c.categories.find(x=>x.id===v.cat); if (!k) return "Pick a category.";
       const nt = Object.assign({}, t, {cat:k.id, catName:k.name, work:v.kind === "work"}), key = merchKey(t.note);
-      editCfg(x => { applyTx(x, t, -1); applyTx(x, nt, 1); if (key) x.bank.rules[key] = nt.work ? "@work" : k.id; });
+      editCfg(x => { applyTx(x, t, -1); applyTx(x, nt, 1); learn(x, key, nt.work ? "@work" : k.id, t.work ? "@work" : t.cat); });
       store.updTx(nt); toast("Updated.");
     },
     deleteLabel:"Send back to review",
@@ -2159,11 +2178,39 @@ function renderBank(){
       h += `<div class="list">` + names.map(([id,n]) => { const a = accts[bk.links[id]]; return `<div class="row"><div class="grow"><div class="t">${esc(n.name)}</div><div class="m">${esc(n.org)}${n.org ? " • " : ""}${a ? "→ " + esc(a.name) : "Not used"}</div></div><span class="v">${money(n.bal)}</span></div>`; }).join("") + `</div>`;
     }
   }
+  const learned = Object.entries(bk.rules);
+  if (learned.length){
+    const tot = k => Object.values(bk.tally[k] || {}).reduce((a, n) => a + n, 0) || 1;
+    h += `<h2>Learned stores <small><button class="sharebtn" id="lsToggle">${state.lsOpen ? "Hide" : "Show " + learned.length}</button></small></h2>`;
+    if (state.lsOpen) h += `<p class="settext">What Review suggests for each store, based on what you've picked most often. Tap one to change it or forget it.</p><div class="list">` +
+      learned.sort((a, b) => tot(b[0]) - tot(a[0]) || a[0].localeCompare(b[0])).map(([k, v]) => { const n = tot(k), hit = (bk.tally[k] || {})[v] || 1, L = choiceLabel(c, v);
+        return `<button class="row" data-ls="${esc(k)}" ${state.readOnly ? "disabled" : ""}><span class="ebub emoji">${esc(L[0])}</span><div class="grow"><div class="t">${esc(k.replace(/\b\w/g, ch => ch.toUpperCase()))}</div><div class="m">${esc(L[1])}${n > 1 ? ` • ${hit} of ${n} times` : ""}</div></div></button>`; }).join("") + `</div>`;
+  }
   if (key) h += `<div class="list" style="margin-top:22px">
       <button class="row" id="sfRefresh" ${state.bankBusy ? "disabled" : ""}><div class="grow"><div class="t">Refresh account list</div><div class="m">After adding a bank on the SimpleFIN Bridge.</div></div></button>
       <button class="row" id="sfDisconnect"><div class="grow"><div class="t" style="color:var(--warn)">${state.sfConfirm ? "Tap again to disconnect" : "Disconnect this device"}</div><div class="m">Deletes the key from this device. Imported transactions stay. To shut off access everywhere, also delete this app's access on the SimpleFIN Bridge.</div></div></button></div>`;
   h += `<div style="height:28px"></div>`;
   $("bankBody").innerHTML = h;
+}
+function choiceLabel(c, v){
+  if (v === "@work") return ["🧾", "Work"];
+  if (v === "@skip") return ["↔️", "Transfer / not spending"];
+  if (v === "@bill") return ["📅", "Bill"];
+  if (v.startsWith("@pay:")) return ["💸", "Paid " + (acctName(c, v.slice(5)) || "removed account")];
+  const k = c.categories.find(x => x.id === v); return k ? [k.emoji, k.name] : ["📦", "Removed category"];
+}
+function learnedForm(key){
+  const c = cfg(), cur = c.bank.rules[key] || "";
+  const opts = c.categories.map(k => [k.id, k.emoji + " " + k.name]).concat([["@work","🧾 Work"],["@skip","↔️ Transfer / not spending"],["@bill","📅 Bill"]], c.accounts.filter(a => DEBT.has(a.type)).map(a => ["@pay:" + a.id, "💸 Paid " + a.name]));
+  openForm({
+    title: key.replace(/\b\w/g, ch => ch.toUpperCase()),
+    fields:[{k:"v", type:"select", label:"Suggest", options:opts, value:cur}],
+    extra:`<div class="fhelp">Changes the suggestion for new items from this store. Things already filed stay as they are.</div>`,
+    saveLabel:"Save",
+    onSave: v => { editCfg(y => { const n = Object.values(y.bank.tally[key] || {}).reduce((a, x) => a + x, 0) || 1; y.bank.rules[key] = v.v; y.bank.tally[key] = {[v.v]: n}; }); toast("Saved."); },
+    deleteLabel:"Forget this store",
+    onDelete: () => { editCfg(y => { delete y.bank.rules[key]; delete y.bank.tally[key]; }); toast("Forgotten. It will learn again from your next pick."); }
+  });
 }
 function rvGo(d){
   const n = state.bankNew.length; if (!n) return;
@@ -2184,6 +2231,8 @@ $("bankBody").addEventListener("click", async e => {
   if (id === "sfConnect"){ const v = $("sfToken").value.trim(); if (!v) return toast("Paste the setup token first."); return bankConnect(v); }
   if (id === "sfSync") return bankSync(true);
   if (id === "rvPrev" || id === "rvNext") return rvGo(id === "rvNext" ? 1 : -1);
+  if (id === "lsToggle"){ state.lsOpen = !state.lsOpen; return renderBank(); }
+  const ls = e.target.closest("[data-ls]"); if (ls) return learnedForm(ls.dataset.ls);
   if (id === "sfBulk"){
     const todo = (state.bankPlan||[]).filter(x => x.ch[0] && x.ch[0].sug && state.bankNew.some(n => n.id === x.b.id));
     todo.forEach(x => bankResolve(x.b, x.ch[0].v, true));
