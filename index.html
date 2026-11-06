@@ -2034,15 +2034,25 @@ function billNameHit(name, d){
     d.includes(w) || toks.some(t => t.length >= 4 && w.startsWith(t)) || (BILL_ALIAS[w] || []).some(al => al.includes(" ") ? d.includes(al) : toks.includes(al)));
 }
 /* An unpaid bill this month that this bank payment looks like: bill name in the description and/or the exact amount. */
+/* Which bill a bank payment is, if any. The bill's month comes from the purchase date (an Oct 29 charge is October's bill).
+   Name alone isn't enough ("AMAZON MKTPL" is both the subscription and every Amazon order): the amount has to be close too.
+   strong = name + amount agree (beats a learned store pick); weak = exact amount only, no name (used only when nothing is learned). */
+const billMonth = b => monthKey(new Date(bankTs(b)));
 function bankBill(c, b, usedBills){
-  if (b.amt <= 0 || b.month !== NOW) return null;
-  const d = String(b.desc||"").toLowerCase(), paid = state.cur.paid;
+  const mo = billMonth(b);
+  if (b.amt <= 0 || (mo !== NOW && mo !== shiftKey(NOW, -1))) return null;
+  const d = String(b.desc||"").toLowerCase(), paid = mo === NOW ? state.cur.paid : {};
   let best = null, score = 0;
-  insts(c).forEach(x => {
+  insts(c, mo).forEach(x => {
     if (usedBills && usedBills.has(x.pid)) return;
-    const nameHit = billNameHit(x.name, d), amtHit = b.amt >= 2000 && b.amt === billAmt(x);
-    const sc = (nameHit ? 2 : 0) + (amtHit ? 1 : 0) + (nameHit && x.varies ? 1 : 0) - (paid[x.pid] && (nameHit || amtHit) ? 0.5 : 0);  // already checked off: still a match, just ranked lower
-    if (sc > score){ score = sc; best = x; }
+    const ref = mo === NOW ? billAmt(x) : x.amount, diff = Math.abs(b.amt - ref);
+    const close = ref > 0 && diff <= (x.varies ? Math.max(1500, ref * 0.5) : Math.max(100, ref * 0.1));
+    const nameHit = billNameHit(x.name, d), exact = b.amt >= 2000 && b.amt === ref;
+    let sc = 0;
+    if (nameHit && close) sc = 3 + (diff === 0 ? 1 : 0);
+    else if (exact) sc = 1;
+    if (sc && paid[x.pid]) sc -= 0.5;   // already checked off: still a match, ranked lower
+    if (sc > score){ score = sc; best = Object.assign({}, x, {strong: sc >= 2}); }
   });
   return best;
 }
@@ -2052,7 +2062,7 @@ function bankChoices(c, b, m, bill){
   const work = {v:"work", e:"🧾", n:"Work", act:true}, skip = {v:"skip", e:"↔️", n:b.amt < 0 ? "Money in" : "Transfer", act:true};
   const fromAcct = c.accounts.find(a => a.id === b.acct), payCheck = b.amt < 0 && (!fromAcct || !DEBT.has(fromAcct.type)) ? [{v:"paycheck", e:"💵", n:"Paycheck", act:true}] : [];
   const looksPay = /\b(payroll|dir dep|direct dep|direct deposit|salary|paycheck)\b/i.test(String(b.desc||""));
-  const billList = b.amt > 0 ? insts(c, b.month || NOW).slice().sort((p, q) => (bill && p.pid === bill.pid ? -1 : bill && q.pid === bill.pid ? 1 : 0) || p.day - q.day) : [];
+  const billList = b.amt > 0 ? insts(c, billMonth(b)).slice().sort((p, q) => (bill && p.pid === bill.pid ? -1 : bill && q.pid === bill.pid ? 1 : 0) || p.day - q.day) : [];
   const billCh = billList.map(x => ({v:"bill:"+x.pid, e:"📅", n:x.name, act:true, bill:x}));
   // Paying a card or loan the bank feed doesn't cover (Affirm, Klarna...): lowers what you owe there.
   const linked = new Set(Object.values(c.bank.links).filter(Boolean)), from = c.accounts.find(a=>a.id===b.acct);
@@ -2063,7 +2073,7 @@ function bankChoices(c, b, m, bill){
   let list = b.amt < 0 ? payCheck.concat([skip], cats) : billCh.concat(payCh, [skip, work], cats);
   // No rule yet: card payments and transfers look alike at every bank, so put Transfer first for them.
   const looksMove = /\b(payment|pmt|autopay|auto pay|epay|e-payment|transfer|xfer|thank you|zelle to|to savings|from savings)\b/i.test(b.desc);
-  const want = rule === "@paycheck" && payCheck.length ? "paycheck" : !rule && looksPay && payCheck.length ? "paycheck" : bill && (rule === "@bill" || !rule) ? "bill:"+bill.pid : rule.startsWith("@pay:") && payable.some(a => "@pay:"+a.id === rule) ? rule.slice(1) : rule === "@work" ? "work" : rule === "@skip" || rule === "@bill" || rule.startsWith("@pay:") ? "skip" : rule ? "c:"+rule : payHit ? "pay:"+payHit.id : looksMove ? "skip" : "";
+  const want = rule === "@paycheck" && payCheck.length ? "paycheck" : !rule && looksPay && payCheck.length ? "paycheck" : bill && (bill.strong || rule === "@bill" || !rule) ? "bill:"+bill.pid : rule.startsWith("@pay:") && payable.some(a => "@pay:"+a.id === rule) ? rule.slice(1) : rule === "@work" ? "work" : rule === "@bill" ? "" : rule === "@skip" || rule.startsWith("@pay:") ? "skip" : rule ? "c:"+rule : payHit ? "pay:"+payHit.id : looksMove ? "skip" : "";
   const i = list.findIndex(x => x.v === want);
   if (i > 0) list = [list[i]].concat(list.slice(0,i), list.slice(i+1));
   if (i >= 0) list[0] = Object.assign({}, list[0], {sug:true});
@@ -2088,15 +2098,15 @@ function bankResolve(b, choice, quiet){
   }
   if (choice.startsWith("bill:")){
     // The bank balance already reflects this payment, so mark the bill paid WITHOUT moving any balance, and record the real amount.
-    const pid = choice.slice(5), x = insts(c).find(i => i.pid === pid);
-    if (x && b.month === NOW){
+    const pid = choice.slice(5), x = insts(c, billMonth(b)).find(i => i.pid === pid);
+    if (x && billMonth(b) === NOW){
       const map = Object.assign({}, state.cur.paid);
       if (!map[pid]) map[pid] = b.ts;
       if (x.varies || b.amt !== x.amount) map.__amt = Object.assign({}, map.__amt, {[pid]: b.amt});
       store.setPaid(map);
     }
     // A bill that pays down a card or loan the bank feed doesn't cover (an Affirm plan, say): lower what you owe there.
-    editCfg(y => { learn(y, key, "@bill"); if (x && x.cardOf && x.cardOf !== b.acct && !linked.has(x.cardOf)) moveBal(y, x.cardOf, -b.amt); });
+    editCfg(y => { if (x && x.cardOf && x.cardOf !== b.acct && !linked.has(x.cardOf)) moveBal(y, x.cardOf, -b.amt); });
     store.bankSet(b, {status:"bill", bill:pid, done:Date.now()});
     toast(x ? `${x.name} marked paid${x.varies ? " at " + money(b.amt) : ""}. Your allowance isn't touched.` : "Filed as a bill.");
     return;
@@ -2198,10 +2208,10 @@ function renderBank(){
       const LBL = {bill:["📅","Paid a bill"], pay:["💸","Paid a card"]};
       const menuBtn = g => groups[g].length === 1 ? btn(groups[g][0]) : groups[g].length ? `<button data-menu="${g}" aria-expanded="${state.rvMenu === g}" class="${state.rvMenu === g ? "on" : ""}" ${dis}><span class="emoji">${LBL[g][0]}</span>${LBL[g][1]}${state.rvMenu === g ? " ▴" : " ▾"}</button>` : "";
       const actBtns = menuBtn("bill") + menuBtn("pay") + plain.map(btn).join("");
-      const paidNow = b.month === NOW ? state.cur.paid : {};
+      const paidNow = billMonth(b) === NOW ? state.cur.paid : {};
       const item = x => { if (x.v.startsWith("pay:")){ const ac = accts[x.v.slice(4)]; return `<button data-pick="${esc(x.v)}" ${dis}>${ac ? acctTile(ac) : ""}<span>${esc(ac ? ac.name : x.n)}</span></button>`; }
         const bl = x.bill, done = bl && paidNow[bl.pid];
-        return `<button data-pick="${esc(x.v)}" ${dis}><span class="dtile" style="width:32px;height:32px;border-radius:10px"><small>${esc(new Date(2000, (+String(b.month||NOW).slice(5)) - 1, 1).toLocaleDateString("en-US",{month:"short"}))}</small><b style="font-size:.85rem">${bl ? bl.day : ""}</b></span><span>${esc(x.n)}<small class="rvsub">${bl ? money(billAmt(bl)) : ""}${done ? " • already checked off" : ""}</small></span></button>`; };
+        return `<button data-pick="${esc(x.v)}" ${dis}><span class="dtile" style="width:32px;height:32px;border-radius:10px"><small>${esc(new Date(2000, (+billMonth(b).slice(5)) - 1, 1).toLocaleDateString("en-US",{month:"short"}))}</small><b style="font-size:.85rem">${bl ? bl.day : ""}</b></span><span>${esc(x.n)}<small class="rvsub">${bl ? money(billAmt(bl)) : ""}${done ? " • already checked off" : ""}</small></span></button>`; };
       const g = state.rvMenu, payOpen = g && groups[g] && groups[g].length > 1 ? `<div class="rvpay">${groups[g].map(item).join("")}</div>` : "";
       const name = cleanDesc(b.desc), showRaw = name.toLowerCase() !== String(b.desc).replace(/\s{2,}/g," ").trim().toLowerCase();
       h += `<div class="rv one" data-rv="${esc(b.id)}">
