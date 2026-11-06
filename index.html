@@ -770,6 +770,19 @@ const store = {
     const o = lsRead(); (o.paid = o.paid||{})[NOW] = map; lsWrite(o);
   },
   /* bank review queue: one doc per bank transaction, keyed by a hash of (bank account id, bank transaction id) so re-syncs never duplicate */
+  async bankSince(sinceTs){
+    if (state.mode === "db"){ const q = await db.collection("bank").where("ts",">=",sinceTs).get(); return q.docs.map(d => Object.assign({id:d.id}, d.data())); }
+    return (lsRead().bank||[]).filter(b => b.ts >= sinceTs);
+  },
+  async txGet(id){
+    if (state.mode === "db"){ const s2 = await db.doc("tx/"+id).get(); return s2.exists ? Object.assign({id}, s2.data()) : null; }
+    return (lsRead().tx||[]).find(t => t.id === id) || null;
+  },
+  async paidGet(month){
+    if (month === NOW) return Object.assign({}, state.cur.paid);
+    if (state.mode === "db"){ const s2 = await db.doc("paid/"+month).get(); return s2.exists ? s2.data() : {}; }
+    return Object.assign({}, (lsRead().paid||{})[month]);
+  },
   async bankIds(sinceTs){
     if (state.mode === "db"){ const q = await db.collection("bank").where("ts",">=",sinceTs).get(); return new Set(q.docs.map(d=>d.id)); }
     return new Set((lsRead().bank||[]).map(b=>b.id));
@@ -2140,18 +2153,51 @@ function bankResolve(b, choice, quiet){
   let after = null;
   editCfg(x => { if (work) applyTx(x, t, 1); learn(x, key, work ? "@work" : k.id); after = x; });
   if (t.month === NOW) store.addTx(t); else store.addOther(t);
-  store.bankSet(b, {status:"done", done:Date.now()});
+  store.bankSet(b, {status:"done", cat: work ? "@work" : k.id, done:Date.now()});
   if (work) return toast(`${money(t.amt)} work expense. Horizon owes you ${money(ensureHz(after).balance)}. Budget untouched.`);
   const rem = k.limit - (calc().spentBy[k.id]||0);
   toast(`${t.amt < 0 ? money(-t.amt) + " refund to" : money(t.amt) + " to"} ${k.name}.${k.limit && t.month === NOW ? (rem >= 0 ? " " + whole(rem) + " left." : " " + whole(-rem) + " over.") : ""}`);
 }
+/* Send a filed bank item back to Review, reversing whatever filing it did. */
+async function bankUndo(b){
+  const c = cfg(), linked = new Set(Object.values(c.bank.links).filter(Boolean));
+  if (b.status === "done"){
+    const t = await store.txGet(b.id);
+    if (t){ editCfg(y => applyTx(y, t, -1)); store.delTx(t.id); }
+  } else if (b.status === "pay"){
+    const x = (c.payments||[]).find(p => p.id === b.id);
+    editCfg(y => { if (x && !linked.has(x.to)) moveBal(y, x.to, x.amt); y.payments = (y.payments||[]).filter(p => p.id !== b.id); });
+  } else if (b.status === "paycheck"){
+    const d = (c.deposits||[]).find(p => p.id === b.id);
+    editCfg(y => { if (d && d.reimb){ const h = ensureHz(y); h.balance += d.reimb; h.updated = Date.now(); } y.deposits = (y.deposits||[]).filter(p => p.id !== b.id); });
+  } else if (b.status === "bill" && b.bill){
+    const month = billMonth(b), map = await store.paidGet(month), pid = b.bill, owner = (map.__bank||{})[pid];
+    if (map[pid] && (!owner || owner === b.id)){
+      const x = insts(c, month).find(i => i.pid === pid), amt = typeof (map.__amt||{})[pid] === "number" ? map.__amt[pid] : (x ? x.amount : b.amt);
+      delete map[pid]; ["__amt","__bank","__ack"].forEach(k => { if (map[k]){ map[k] = Object.assign({}, map[k]); delete map[k][pid]; } });
+      if (x && x.cardOf && !linked.has(x.cardOf)) editCfg(y => moveBal(y, x.cardOf, amt));
+      store.setPaidMonth(month, map);
+    }
+  }
+  store.bankSet(b, {status:"new"});
+}
+const filedLabel = (c, b) => {
+  if (b.status === "bill"){ const x = c.bills.find(i => b.bill && (i.id === b.bill || b.bill.startsWith(i.id + "@"))); return "📅 Paid " + (x ? x.name : "a") + " bill"; }
+  if (b.status === "pay") return "💸 Paid " + (acctName(c, b.to) || "a card");
+  if (b.status === "paycheck") return "💵 Paycheck";
+  if (b.status === "dup") return "✅ Logged it";
+  if (b.status === "skipped") return b.amt < 0 ? "↔️ Money in / card payment" : "↔️ Transfer";
+  return b.cat ? (choiceLabel(c, b.cat).join(" ")) : "Filed";
+};
 /* A paid bill in Activity: undo it. If it came from Review, it goes back there to be filed again. */
 async function billPaidView(pid, month){
   const c = cfg(), paid = month === NOW ? state.cur.paid : (state.viewPaid || {});
   const x = insts(c, month).find(i => i.pid === pid); if (!x || !paid[pid]) return;
   const amt = typeof (paid.__amt||{})[pid] === "number" ? paid.__amt[pid] : x.amount;
   let bankItem = (paid.__bank||{})[pid];
-  if (!bankItem){ try{ const hits = (await store.bankByBill(pid)).filter(b => b.status === "bill" && billMonth(b) === month).sort((a, b) => b.ts - a.ts); if (hits[0]) bankItem = hits[0].id; }catch(e){} }
+  let extra = [];
+  if (!bankItem){ try{ const near = new Set([month, shiftKey(month, -1), shiftKey(month, 1)]);
+    extra = (await store.bankByBill(pid)).filter(b => b.status === "bill" && (near.has(billMonth(b)) || near.has(b.month))); if (extra[0]) bankItem = extra[0].id; }catch(e){} }
   openForm({
     title: x.name, fields:[],
     extra:`<div class="card"><div class="sum"><span>Paid</span><b>${esc(new Date(paid[pid]).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}</b></div><div class="sum total"><span>Amount</span><b>${money(amt)}</b></div></div>`,
@@ -2164,8 +2210,9 @@ async function billPaidView(pid, month){
         const linked = new Set(Object.values(c.bank.links).filter(Boolean));
         if (x.cardOf && !linked.has(x.cardOf)) editCfg(y => moveBal(y, x.cardOf, amt));   // undo the paydown on an unlinked card/loan
         store.setPaidMonth(month, map);
-        const b = await store.bankGet(bankItem); if (b) store.bankSet(b, {status:"new"});
-        return toast(`${x.name} unmarked. The bank item is back in Review.`);
+        const items = extra.length ? extra : [await store.bankGet(bankItem)].filter(Boolean);
+        items.forEach(b => store.bankSet(b, {status:"new"}));
+        return toast(`${x.name} unmarked. ${items.length === 1 ? "The bank item is" : items.length + " bank items are"} back in Review.`);
       }
       if (month === NOW) return setBillPaid(pid, false);
       store.setPaidMonth(month, map); toast(`${x.name} unmarked.`);
@@ -2274,6 +2321,15 @@ function renderBank(){
   if (!key && !anyLink && !state.bankNew.length)
     h += `<div class="card" style="margin-top:4px"><div class="t" style="white-space:normal">Bring in transactions from your bank</div><div class="m" style="white-space:normal;margin:4px 0 12px">Connect once, and new purchases show up here to file with one tap.</div><button class="small-primary" data-goto="settings" style="width:100%">Set up bank sync</button></div>`;
   else h += `<div class="syncline"><span>${key ? (state.bankBusy ? "Syncing…" : bk.lastSync ? "Synced " + esc(syncWhen(bk.lastSync)) : "Not synced yet") : "Syncs from another device"}</span>${key && anyLink && !state.readOnly ? `<button class="linkbtn" id="sfSync" ${state.bankBusy ? "disabled" : ""}>Sync now</button>` : ""}<button class="linkbtn" data-goto="settings">Bank settings</button></div>`;
+  if (anyLink || state.bankNew.length){
+    h += `<h2>${h2t("Recently filed", "Everything you filed from the bank in the last 60 days. Tap one to send it back to Review; whatever filing it did is undone.")} <small><button class="sharebtn" id="rfToggle">${state.rfOpen ? "Hide" : "Show"}</button></small></h2>`;
+    if (state.rfOpen){
+      const rf = state.rf;
+      if (!rf) h += `<div class="list"><div class="empty">Loading…</div></div>`;
+      else if (!rf.length) h += `<div class="list"><div class="empty">Nothing filed yet.</div></div>`;
+      else h += `<div class="list">` + rf.slice(0, 80).map(b => { const a = accts[b.acct]; return `<button class="row" data-rf="${esc(b.id)}" ${state.readOnly ? "disabled" : ""}>${a ? acctTile(a) : `<span class="itile">?</span>`}<div class="grow"><div class="t">${esc(niceDesc(b.desc))}</div><div class="m">${esc(new Date(bankTs(b)).toLocaleDateString("en-US",{month:"short",day:"numeric"}))} • ${esc(filedLabel(c, b))}</div></div><span class="v ${b.amt < 0 ? "in" : ""}" style="${b.amt < 0 ? "color:var(--good)" : ""}">${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</span></button>`; }).join("") + `</div>`;
+    }
+  }
   h += `<div style="height:28px"></div>`;
   $("bankBody").innerHTML = h;
 }
@@ -2344,6 +2400,11 @@ function learnedForm(key){
     onDelete: () => { editCfg(y => { delete y.bank.rules[key]; delete y.bank.tally[key]; }); toast("Forgotten. It will learn again from your next pick."); }
   });
 }
+async function loadFiled(){
+  try{ const all = await store.bankSince(Date.now() - 60*DAY_MS); state.rf = all.filter(b => b.status && b.status !== "new").sort((a, b) => (b.done||b.ts) - (a.done||a.ts)); }
+  catch(e){ state.rf = []; }
+  renderBankUI();
+}
 function rvGo(d){
   const n = state.bankNew.length; if (!n) return;
   const ni = Math.max(0, Math.min((state.rvIdx||0) + d, n - 1)); if (ni === state.rvIdx) return;
@@ -2366,6 +2427,13 @@ async function bankClick(e){
   if (id === "sfConnect"){ const v = $("sfToken").value.trim(); if (!v) return toast("Paste the setup token first."); return bankConnect(v); }
   if (id === "sfSync") return bankSync(true);
   if (id === "rvPrev" || id === "rvNext") return rvGo(id === "rvNext" ? 1 : -1);
+  if (id === "rfToggle"){ state.rfOpen = !state.rfOpen; state.rf = null; renderBankUI(); if (state.rfOpen) loadFiled(); return; }
+  const rfb = e.target.closest("[data-rf]"); if (rfb){
+    const b = (state.rf||[]).find(x => x.id === rfb.dataset.rf); if (!b) return;
+    return openForm({title: niceDesc(b.desc), fields:[], extra:`<div class="card"><div class="sum"><span>Filed as</span><b>${esc(filedLabel(cfg(), b))}</b></div><div class="sum total"><span>Amount</span><b>${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</b></div></div>`,
+      saveLabel:"Done", onSave: () => {}, deleteLabel:"Send back to Review",
+      onDelete: async () => { await bankUndo(b); state.rf = (state.rf||[]).filter(x => x.id !== b.id); toast("Back in Review."); renderBankUI(); }});
+  }
   if (id === "lsToggle"){ state.lsOpen = !state.lsOpen; return renderBankUI(); }
   const ls = e.target.closest("[data-ls]"); if (ls) return learnedForm(ls.dataset.ls);
   if (id === "sfBulk"){
