@@ -876,6 +876,7 @@ function go(view){
   document.querySelectorAll("[data-go]").forEach(b => b.toggleAttribute("aria-current", false) || (b.dataset.go===view && b.setAttribute("aria-current","page")));
   $("title").textContent = view === "home" ? keyToDate(NOW).toLocaleString("en-US",{month:"long",year:"numeric"}) : NAV.find(n=>n[0]===view)[2];
   $("leftPill").hidden = view === "home";
+  $("topAdd").setAttribute("aria-label", "Add a cash expense");
   closeNav();
   if (view === "history") loadHistory();
   if (location.hash !== "#"+view) history.replaceState(null,"","#"+view);
@@ -917,7 +918,6 @@ function renderHome(){
       <div class="big">${r.left<0 ? "−"+whole(-r.left) : whole(r.left)}</div>
       <div class="meter"><i style="width:${(used*100).toFixed(1)}%"></i></div>
       <div class="fine">${r.period ? periodLine(r) : payLine(r)}</div>
-      ${addBtnHtml()}
     </div>`;
   } else {
     html = `<div class="hcol hleft"><div class="hero">
@@ -925,7 +925,6 @@ function renderHome(){
       <div class="big" style="font-size:2rem">Add your income</div>
       <div class="fine">Enter your monthly take-home pay so bills and savings come out first. Then this shows what's left for everything else.</div>
       <button class="setinc" data-goto="planner">Set income</button>
-      ${addBtnHtml()}
     </div>`;
   }
   const elapsed = r.period ? r.elapsed : new Date().getDate() / daysIn(NOW), lim = r.limitOf;
@@ -2711,7 +2710,7 @@ function renderAll(){
   renderHeader();
   if (state.view === "home") renderHome();
   if ($("addSheet").open) renderChips();
-  $("topAdd").hidden = state.readOnly || state.mode === "loading" || state.view === "home";
+  $("topAdd").hidden = state.readOnly || state.mode === "loading";
   if (state.view === "activity") renderActivity();
   if (state.view === "accounts") renderAccounts();
   if (state.view === "horizon") renderHorizon();
