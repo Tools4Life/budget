@@ -465,6 +465,7 @@ html{touch-action:manipulation}
     <section class="view" id="v-home"><div class="pagepad" id="homeBody"></div></section>
     <section class="view" id="v-activity"><div class="pagepad" id="activityBody"></div></section>
     <section class="view" id="v-accounts"><div class="pagepad" id="accountsBody"></div></section>
+    <section class="view" id="v-horizon"><div class="pagepad" id="horizonBody"></div></section>
     <section class="view" id="v-bills"><div class="pagepad" id="billsBody"></div></section>
     <section class="view" id="v-planner"><div class="pagepad" id="plannerBody"></div></section>
     <section class="view" id="v-play"><div class="pagepad" id="playBody"></div></section>
@@ -649,7 +650,7 @@ function normalize(c){
     income: c.income||0, savings: c.savings||0,
     categories:(c.categories||[]).map(k=>({id:k.id,name:k.name,limit:k.limit||0,emoji:k.emoji||EMOJI_BY_ID[k.id]||"📦"})),
     bills:(c.bills||[]).map(b=>({id:b.id,name:b.name,amount:b.amount||0,day:b.day||1,emoji:b.emoji||"🧾",type:b.type||"bill",varies:!!b.varies,cardOf:b.cardOf||"",fromAcct:b.fromAcct||"",freq:b.freq==="biweekly"?"biweekly":"monthly",start:b.start||"",end:b.end||""})),
-    accounts:(c.accounts||[]).map(a=>({id:a.id,name:a.name,emoji:a.emoji||"🏦",type:a.type||"checking",balance:a.balance||0,updated:a.updated||0,color:a.color||"",apr:typeof a.apr==="number"?a.apr:null,min:a.min||0,due:a.due||0})),
+    accounts:(c.accounts||[]).map(a=>({id:a.id,name:a.name,emoji:a.emoji||"🏦",type:a.type||"checking",balance:a.balance||0,updated:a.updated||0,color:a.color||"",apr:typeof a.apr==="number"?a.apr:null,min:a.min||0,due:a.due||0,work: typeof a.work === "boolean" ? a.work : /\bamex\b|american express/i.test(a.name||"")})),
     plan:Object.assign({strategy:"avalanche",total:0,custom:{}}, c.plan||{}),
     deposits:(c.deposits||[]).slice(0,24),
     payments:(c.payments||[]).slice(0,60),
@@ -863,8 +864,9 @@ function calc(){
 
 /* ---------------- nav ---------------- */
 const ICON = {"history": "<path d=\"M3 12a9 9 0 1 0 3-6.7\"/><path d=\"M3 4v4h4\"/><path d=\"M12 7v5l3 2\"/>", "settings": "<circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z\"/>", "play": "<path d=\"M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0\"/><circle cx=\"16\" cy=\"6\" r=\"2\"/><circle cx=\"10\" cy=\"12\" r=\"2\"/><circle cx=\"18\" cy=\"18\" r=\"2\"/>", "home": "<path d=\"M3 11l9-7 9 7\"/><path d=\"M5 10v10h14V10\"/>", "activity": "<path d=\"M8 6h13M8 12h13M8 18h13\"/><circle cx=\"3.5\" cy=\"6\" r=\"1\"/><circle cx=\"3.5\" cy=\"12\" r=\"1\"/><circle cx=\"3.5\" cy=\"18\" r=\"1\"/>", "accounts": "<path d=\"M3 10l9-6 9 6\"/><path d=\"M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18\"/>", "bills": "<rect x=\"3\" y=\"5\" width=\"18\" height=\"16\" rx=\"3\"/><path d=\"M3 10h18M8 3v4M16 3v4\"/>", "planner": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><circle cx=\"12\" cy=\"12\" r=\"5\"/><circle cx=\"12\" cy=\"12\" r=\"1.2\"/>"};
+ICON.horizon = "<rect x=\"3\" y=\"7\" width=\"18\" height=\"13\" rx=\"2.5\"/><path d=\"M8.5 7V5.5A1.5 1.5 0 0 1 10 4h4a1.5 1.5 0 0 1 1.5 1.5V7\"/><path d=\"M3 12.5h18\"/>";
 ICON.bank = "<path d=\"M3 13h5l1.5 3h5L16 13h5\"/><path d=\"M5.5 5h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z\"/>";
-const NAV = [["home","","Home"],["bank","","Review"],["activity","","Activity"],["accounts","","Accounts"],["bills","","Bills"],["planner","","Planner"],["play","","Playground"],["history","","History"],["settings","","Settings"]];
+const NAV = [["home","","Home"],["bank","","Review"],["activity","","Activity"],["accounts","","Accounts"],["horizon","","Horizon"],["bills","","Bills"],["planner","","Planner"],["play","","Playground"],["history","","History"],["settings","","Settings"]];
 $("navlist").innerHTML = NAV.map(([id,e,n]) => `<button class="navbtn" data-go="${id}"><svg class="nicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[id]}</svg>${n}${id === "bank" ? '<span class="nbadge" id="bankBadge" hidden></span>' : ""}</button>`).join("");
 function go(view){
   if (!NAV.find(n=>n[0]===view)) view = "home";
@@ -1328,6 +1330,31 @@ async function exportCsv(){
   else { try{ await navigator.clipboard.writeText(csv); toast("CSV copied. Paste it into Numbers or Sheets."); }catch(e){ toast("Export isn't available here."); } }
 }
 
+/* ---------------- render: Horizon (work expenses and reimbursements) ---------------- */
+function renderHorizon(){
+  const c = cfg(), h = c.accounts.find(a => a.type === "reimb"), owed = h ? h.balance : 0;
+  const work = state.cur.tx.filter(t => t.work).sort((a, b) => b.ts - a.ts), wt = work.reduce((a, t) => a + t.amt, 0);
+  const reimb = (c.deposits||[]).filter(d => d.reimb > 0).sort((a, b) => b.ts - a.ts);
+  const cards = c.accounts.filter(a => a.work);
+  const accts = Object.fromEntries(c.accounts.map(a => [a.id, a]));
+  const mo = keyToDate(NOW).toLocaleString("en-US",{month:"long"});
+  let html = `<div class="hero" style="background:var(--good)"><div class="lbl">Horizon owes you</div><div class="big">${whole(owed)}</div>
+    <div class="fine">${h && h.updated ? "Updated " + esc(new Date(h.updated).toLocaleDateString("en-US",{month:"short",day:"numeric"})) + " • " : ""}work expenses go up, paycheck reimbursements come down${ib("Work expenses (the Work button or the Work Expense category) add to this and never come out of your allowance. When a paycheck includes a reimbursement line, filing it as Paycheck in Review takes that amount off.")}</div></div>`;
+  html += `<h2>${h2t("Work expenses in " + mo)} <small>${work.length ? money(wt) : ""}</small></h2>`;
+  html += work.length ? `<div class="list">` + work.map(t => { const a = accts[t.acct]; return `<button class="row rowbtn" data-hwork="${esc(t.id)}" ${state.readOnly ? "disabled" : ""}>${a ? acctTile(a) : `<span class="itile">?</span>`}<div class="grow"><div class="t">${esc(t.note || t.catName || "Work expense")}</div><div class="m">${esc(new Date(t.ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}${a ? " • " + esc(a.name) : ""}</div></div><span class="v">${money(t.amt)}</span></button>`; }).join("") + `</div>`
+    : `<div class="list"><div class="empty">No work expenses yet this month.</div></div>`;
+  html += `<h2>Reimbursements</h2>` + (reimb.length ? `<div class="list">` + reimb.slice(0, 8).map(d => `<div class="row"><span class="ebub emoji">💵</span><div class="grow"><div class="t">${esc(new Date(d.ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}))} paycheck</div><div class="m">${money(d.wages)} pay + reimbursement</div></div><span class="v" style="color:var(--good)">${money(d.reimb)}</span></div>`).join("") + `</div>`
+    : `<div class="list"><div class="empty">None yet. File your paycheck as Paycheck in Review and enter the reimbursement line.</div></div>`);
+  html += `<h2>${h2t("Work cards", "Charges on these come into Review with Work already picked. Change it under Accounts by tapping a card, then 'Mostly used for'.")}</h2>` + (cards.length ? `<div class="list">` + cards.map(a => `<button class="row" data-hcard="${esc(a.id)}">${acctTile(a)}<div class="grow"><div class="t">${esc(a.name)}</div><div class="m">Mostly Horizon work</div></div></button>`).join("") + `</div>` : `<div class="list"><div class="empty">No card is set as a work card.</div></div>`);
+  if (h && !state.readOnly) html += `<button class="ghost" id="hAdjust">Correct the amount owed</button>`;
+  $("horizonBody").innerHTML = html + `<div style="height:28px"></div>`;
+}
+$("horizonBody").addEventListener("click", e => {
+  const w = e.target.closest("[data-hwork]"); if (w){ const t = state.cur.tx.find(x => x.id === w.dataset.hwork); if (t) (t.bank ? bankTxForm(t) : openAdd(null, t)); return; }
+  const cd = e.target.closest("[data-hcard]"); if (cd) return acctForm(cfg().accounts.find(a => a.id === cd.dataset.hcard));
+  if (e.target.id === "hAdjust"){ const h = cfg().accounts.find(a => a.type === "reimb"); if (h) acctForm(h); }
+});
+
 /* ---------------- render: accounts ---------------- */
 function renderAccounts(){
   const c = cfg();
@@ -1340,7 +1367,7 @@ function renderAccounts(){
     <div class="sum"><span>Horizon owes you</span><b>+${money(recv)}</b></div>
     <div class="sum total"><span>True position</span><b style="color:${cash+recv-debts<0?"var(--warn)":"var(--good)"}">${signed(cash+recv-debts)}</b></div></div>`;
   let html = "";
-  const groups = [["Cash", cashA],["Owed to you", recvA],["Cards, loans, and BNPL", debtA]];
+  const groups = [["Cash", cashA],["Cards, loans, and BNPL", debtA]];
   groups.forEach(([title, arr]) => {
     if (!arr.length) return;
     html += `<h2>${title}</h2><div class="list">` + arr.map(a => {
@@ -1491,10 +1518,12 @@ function acctForm(a, presetType){
       {k:"name", type:"text", label:"Name", value:a.name, placeholder:"Chase checking"},
       {k:"color", type:"color", label:"Color", options:ACCT_COLORS, value:acctColor(a)},
       {k:"type", type:"seg", label:"Type", options:ACCT_TYPES, value:a.type},
+      ...(a.type === "reimb" ? [] : [{k:"work", type:"seg", label:"Mostly used for", options:[["no","Personal"],["yes","Horizon work"]], value:a.work ? "yes" : "no", help:"Horizon work: charges on this account come into Review with Work already picked, so 'File highlighted picks' files them all as Horizon expenses. Filing them doesn't teach the app anything about the store, so your personal purchases at the same places aren't affected."}]),
       {k:"balance", type:"money", label: DEBT.has(a.type) ? "Balance owed" : "Current balance", value:a.balance, help: Object.values(cfg().bank.links).includes(a.id) ? "Linked to your bank, so this updates on every sync. Anything typed here is replaced at the next sync." : "For cards and loans, enter what you owe. Typing the real number from your bank or card app once a month keeps it accurate."}
     ],
     saveLabel: isNew ? "Add account" : "Save account",
     onSave: v => { if (!v.name) return "Give the account a name.";
+      v.work = v.work === "yes";
       editCfg(c => { const n = Object.assign({}, a, v, {updated:Date.now()}); const i = c.accounts.findIndex(x=>x.id===a.id); if (i<0) c.accounts.push(n); else c.accounts[i] = n; });
       toast(isNew ? "Account added." : "Account saved."); },
     onDelete: isNew ? null : () => { editCfg(c => { c.accounts = c.accounts.filter(x=>x.id!==a.id); }); toast("Account removed."); }
@@ -2151,7 +2180,8 @@ function bankChoices(c, b, m, bill){
   let list = b.amt < 0 ? payCheck.concat([skip], cats) : billCh.concat(payCh, [skip, work], cats);
   // No rule yet: card payments and transfers look alike at every bank, so put Transfer first for them.
   const looksMove = /\b(payment|pmt|autopay|auto pay|epay|e-payment|transfer|xfer|thank you|zelle to|to savings|from savings)\b/i.test(b.desc);
-  const want = rule === "@paycheck" && payCheck.length ? "paycheck" : !rule && looksPay && payCheck.length ? "paycheck" : bill && (bill.strong || rule === "@bill" || !rule) ? "bill:"+bill.pid : rule.startsWith("@pay:") && payable.some(a => "@pay:"+a.id === rule) ? rule.slice(1) : rule === "@work" ? "work" : rule === "@bill" ? "" : rule === "@skip" || rule.startsWith("@pay:") ? "skip" : rule ? "c:"+rule : payHit ? "pay:"+payHit.id : looksMove ? "skip" : "";
+  const workCard = !!(fromAcct && fromAcct.work) && b.amt > 0;
+  const want = workCard ? (bill && bill.strong ? "bill:"+bill.pid : "work") : rule === "@paycheck" && payCheck.length ? "paycheck" : !rule && looksPay && payCheck.length ? "paycheck" : bill && (bill.strong || rule === "@bill" || !rule) ? "bill:"+bill.pid : rule.startsWith("@pay:") && payable.some(a => "@pay:"+a.id === rule) ? rule.slice(1) : rule === "@work" ? "work" : rule === "@bill" ? "" : rule === "@skip" || rule.startsWith("@pay:") ? "skip" : rule ? "c:"+rule : payHit ? "pay:"+payHit.id : looksMove ? "skip" : "";
   const i = list.findIndex(x => x.v === want);
   if (i > 0) list = [list[i]].concat(list.slice(0,i), list.slice(i+1));
   if (i >= 0) list[0] = Object.assign({}, list[0], {sug:true});
@@ -2161,8 +2191,11 @@ function bankChoices(c, b, m, bill){
 function bankResolve(b, choice, quiet){
   if (state.readOnly) return toast("View only.");
   if (quiet){ const t0 = toast; toast = () => {}; try{ return bankResolve(b, choice); } finally{ toast = t0; } }
-  const c = cfg(), key = merchKey(b.desc), linked = new Set(Object.values(c.bank.links).filter(Boolean));
+  const c = cfg(), linked = new Set(Object.values(c.bank.links).filter(Boolean));
+  let key = merchKey(b.desc);
   if (choice === "paycheck") return paycheckForm(b, key);
+  const wa = c.accounts.find(a => a.id === b.acct);
+  if (wa && wa.work) key = "";   // work-card charges don't teach store picks (a work run to Lowe's shouldn't make personal Lowe's say Work)
   if (choice.startsWith("pay:")){
     const to = choice.slice(4), ta = c.accounts.find(a=>a.id===to); if (!ta) return;
     editCfg(y => {
@@ -2618,6 +2651,7 @@ function renderAll(){
   $("topAdd").hidden = state.readOnly || state.mode === "loading" || state.view === "home";
   if (state.view === "activity") renderActivity();
   if (state.view === "accounts") renderAccounts();
+  if (state.view === "horizon") renderHorizon();
   if (state.view === "bills") renderBills();
   if (state.view === "planner") renderPlanner();
   if (state.view === "play") renderPlay();
