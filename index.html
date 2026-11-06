@@ -2126,6 +2126,8 @@ function bankBill(c, b, usedBills){
     let sc = 0;
     if (nameHit && close) sc = 3 + (diff === 0 ? 1 : 0);
     else if (exact) sc = 1;
+    // Every-2-weeks bills have two due dates a month: the one nearest the payment date wins (up to +0.4).
+    if (sc){ const [yy, mm] = mo.split("-").map(Number), due = new Date(yy, mm - 1, Math.min(x.day, daysIn(mo)), 12).getTime(); sc += 0.4 * (1 - Math.min(Math.abs(due - bankTs(b)) / DAY_MS, 14) / 14); }
     if (sc && paid[x.pid]) sc -= 0.5;   // already checked off: still a match, ranked lower
     if (sc > score){ score = sc; best = Object.assign({}, x, {strong: sc >= 2}); }
   });
