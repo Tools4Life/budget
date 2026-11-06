@@ -376,6 +376,10 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 .navbtn .nbadge{margin-left:auto;min-width:22px;height:22px;border-radius:11px;background:var(--accent);color:#fff;font-size:.75rem;font-weight:800;display:grid;place-items:center;padding:0 6px}
 .nbadge[hidden]{display:none}
 .pgact{white-space:normal !important}
+.asub{display:flex;justify-content:space-between;color:var(--muted);font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin:14px 4px 6px}
+.asub:first-of-type{margin-top:4px}
+.hzline{display:flex;align-items:center;gap:10px;width:100%;margin-top:10px;border:1.5px solid color-mix(in srgb,var(--good) 35%,transparent);background:color-mix(in srgb,var(--good) 9%,var(--bg));color:var(--good);border-radius:16px;padding:12px 14px;font-weight:600;text-align:left}
+.hzline span{flex:1}
 .pghero{background:var(--good)}
 .pghero.neg{background:var(--warn)}
 .pghero .fine b{color:#fff}
@@ -871,7 +875,7 @@ function calc(){
 const ICON = {"history": "<path d=\"M3 12a9 9 0 1 0 3-6.7\"/><path d=\"M3 4v4h4\"/><path d=\"M12 7v5l3 2\"/>", "settings": "<circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z\"/>", "play": "<path d=\"M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0\"/><circle cx=\"16\" cy=\"6\" r=\"2\"/><circle cx=\"10\" cy=\"12\" r=\"2\"/><circle cx=\"18\" cy=\"18\" r=\"2\"/>", "home": "<path d=\"M3 11l9-7 9 7\"/><path d=\"M5 10v10h14V10\"/>", "activity": "<path d=\"M8 6h13M8 12h13M8 18h13\"/><circle cx=\"3.5\" cy=\"6\" r=\"1\"/><circle cx=\"3.5\" cy=\"12\" r=\"1\"/><circle cx=\"3.5\" cy=\"18\" r=\"1\"/>", "accounts": "<path d=\"M3 10l9-6 9 6\"/><path d=\"M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18\"/>", "bills": "<rect x=\"3\" y=\"5\" width=\"18\" height=\"16\" rx=\"3\"/><path d=\"M3 10h18M8 3v4M16 3v4\"/>", "planner": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><circle cx=\"12\" cy=\"12\" r=\"5\"/><circle cx=\"12\" cy=\"12\" r=\"1.2\"/>"};
 ICON.horizon = "<rect x=\"3\" y=\"7\" width=\"18\" height=\"13\" rx=\"2.5\"/><path d=\"M8.5 7V5.5A1.5 1.5 0 0 1 10 4h4a1.5 1.5 0 0 1 1.5 1.5V7\"/><path d=\"M3 12.5h18\"/>";
 ICON.bank = "<path d=\"M3 13h5l1.5 3h5L16 13h5\"/><path d=\"M5.5 5h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z\"/>";
-const NAV = [["home","","Home"],["bank","","Review"],["activity","","Activity"],["accounts","","Accounts"],["horizon","","Horizon"],["bills","","Bills"],["planner","","Planner"],["play","","Playground"],["history","","History"],["settings","","Settings"]];
+const NAV = [["home","","Home"],["bank","","Review"],["activity","","Activity"],["accounts","","Accounts"],["horizon","","Reimbursements"],["bills","","Bills"],["planner","","Planner"],["play","","Playground"],["history","","History"],["settings","","Settings"]];
 $("navlist").innerHTML = NAV.map(([id,e,n]) => `<button class="navbtn" data-go="${id}"><svg class="nicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[id]}</svg>${n}${id === "bank" ? '<span class="nbadge" id="bankBadge" hidden></span>' : ""}</button>`).join("");
 function go(view){
   if (!NAV.find(n=>n[0]===view)) view = "home";
@@ -949,12 +953,19 @@ function renderHome(){
 /* Keep Home to one screen: drop Due this week rows from the bottom until it fits, with a "more" link to Bills. */
 const WIDE = window.matchMedia("(min-width:1024px)");
 WIDE.addEventListener && WIDE.addEventListener("change", () => { if (state.view === "home") renderHome(); });
+/* Account sections in a fixed order: Checking, Credit cards, BNPL, Savings. Horizon is shown separately. */
+const ACCT_GROUPS = [["Checking", a => a.type === "checking"], ["Credit cards", a => a.type === "credit"], ["BNPL", a => a.type === "loan"], ["Savings", a => a.type === "savings"]];
 function deskAccountsHtml(c){
-  const list = (c.accounts||[]).filter(a => a.balance || a.type === "checking");
-  if (!list.length) return "";
-  const lbl = a => DEBT.has(a.type) ? "owed" : a.type === "reimb" ? "owed to you" : "";
-  return `<div class="deskonly"><h2>Accounts <small><button class="sharebtn" data-goto="accounts">Open</button></small></h2><div class="list">` + list.map(a =>
-    `<button class="row" data-goto="accounts">${acctTile(a)}<div class="grow"><div class="t">${esc(a.name)}</div><div class="m">${a.updated ? "Updated " + new Date(a.updated).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : ""}</div></div><span class="v">${money(a.balance)}${lbl(a) ? ` <small style="color:var(--muted);font-weight:500">${lbl(a)}</small>` : ""}</span></button>`).join("") + `</div></div>`;
+  const all = (c.accounts||[]).filter(a => a.type !== "reimb" && (a.balance || a.type === "checking"));
+  if (!all.length) return "";
+  const hz = (c.accounts||[]).find(a => a.type === "reimb" && a.balance);
+  const lbl = a => DEBT.has(a.type) ? "owed" : "";
+  const row = a => `<button class="row" data-goto="accounts">${acctTile(a)}<div class="grow"><div class="t">${esc(a.name)}</div><div class="m">${a.updated ? "Updated " + new Date(a.updated).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : ""}</div></div><span class="v">${money(a.balance)}${lbl(a) ? ` <small style="color:var(--muted);font-weight:500">${lbl(a)}</small>` : ""}</span></button>`;
+  let h = `<div class="deskonly"><h2>Accounts <small><button class="sharebtn" data-goto="accounts">Open</button></small></h2>`;
+  ACCT_GROUPS.forEach(([title, test]) => { const g = all.filter(test); if (!g.length) return;
+    const tot = g.reduce((s2, a) => s2 + a.balance, 0);
+    h += `<div class="asub"><span>${title}</span>${g.length > 1 ? `<span>${money(tot)}${DEBT.has(g[0].type) ? " owed" : ""}</span>` : ""}</div><div class="list">` + g.map(row).join("") + `</div>`; });
+  return h + (hz ? `<button class="hzline" data-goto="horizon"><span>Horizon owes you</span><b>+${money(hz.balance)}</b></button>` : "") + `</div>`;
 }
 function fitHome(){
   if (WIDE.matches){ const b = $("homeBody"); b.classList.remove("tight"); b.querySelectorAll(".row[data-due]").forEach(r => r.hidden = false); const m = b.querySelector("[data-more]"); if (m) m.remove(); return; }
@@ -1371,15 +1382,15 @@ function renderAccounts(){
     <div class="sum"><span>Horizon owes you</span><b>+${money(recv)}</b></div>
     <div class="sum total"><span>True position</span><b style="color:${cash+recv-debts<0?"var(--warn)":"var(--good)"}">${signed(cash+recv-debts)}</b></div></div>`;
   let html = "";
-  const groups = [["Cash", cashA],["Cards, loans, and BNPL", debtA]];
+  const groups = ACCT_GROUPS.map(([t, test]) => [t, c.accounts.filter(test)]);
   groups.forEach(([title, arr]) => {
     if (!arr.length) return;
     html += `<h2>${title}</h2><div class="list">` + arr.map(a => {
       const tl = (ACCT_TYPES.find(x=>x[0]===a.type)||[,""])[1];
       const sp = spentByAcct[a.id] || 0;
-      const meta = a.type === "reimb" ? (workN ? workN + " work expense" + (workN===1?"":"s") + " this month" : "Unpaid work expenses") : (sp ? money(sp) + " this month" : tl);
+      const meta = a.type === "reimb" ? (workN ? workN + " work expense" + (workN===1?"":"s") + " this month" : "Unpaid work expenses") : (sp ? money(sp) + " this month" : "");
       return `<button class="row" data-acct="${esc(a.id)}" ${state.readOnly?"disabled":""}><span class="abar" style="background:${acctColor(a)}"></span>
-        <div class="grow"><div class="t">${esc(a.name)}</div><div class="m">${meta}${a.updated ? " • " + new Date(a.updated).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : ""}</div></div>
+        <div class="grow"><div class="t">${esc(a.name)}</div><div class="m">${[meta, a.updated ? "Updated " + new Date(a.updated).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : ""].filter(Boolean).join(" • ")}</div></div>
         <span class="v">${money(a.balance)}</span></button>`;
     }).join("") + `</div>`;
   });
