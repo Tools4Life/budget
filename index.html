@@ -12,6 +12,7 @@
 <meta name="theme-color" content="#FFFFFF">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-wallet-180.png">
+<link rel="apple-touch-icon" sizes="512x512" href="icon-wallet-512.png">
 <link rel="icon" type="image/png" href="icon-wallet-192.png">
 <script>window.FB={email:null,signOut:function(){}};window.FB.ready=new Promise(function(r){window.FB._r=r});</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -375,6 +376,9 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 .navbtn .nbadge{margin-left:auto;min-width:22px;height:22px;border-radius:11px;background:var(--accent);color:#fff;font-size:.75rem;font-weight:800;display:grid;place-items:center;padding:0 6px}
 .nbadge[hidden]{display:none}
 .pgact{white-space:normal !important}
+.pghero{background:var(--good)}
+.pghero.neg{background:var(--warn)}
+.pghero .fine b{color:#fff}
 .hero .ibtn{border-color:rgba(255,255,255,.55);color:#fff;background:transparent;width:20px;height:20px;vertical-align:-4px}
 .ibtn{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line);background:var(--bg);color:var(--muted);font:italic 700 .78rem/1 Georgia,"Times New Roman",serif;padding:0;margin-left:7px;flex:none;cursor:pointer;vertical-align:1px}
 .ibtn:hover{border-color:var(--muted);color:var(--ink)}
@@ -1719,24 +1723,27 @@ function renderPlay(){
   const c = cfg(), r = calc(), ro = state.readOnly ? "disabled" : "", chk = pgChk(c);
   const debts = c.accounts.filter(a=>DEBT.has(a.type)).sort((a,b)=>(a.type==="credit"?0:1)-(b.type==="credit"?0:1));
   if (!chk){ $("playBody").dataset.sig = ""; $("playBody").innerHTML = `<div class="list"><div class="empty">Add your Checking account on Accounts first.</div></div>`; return; }
-  const sig = [NOW, state.readOnly, state.hist.loaded, JSON.stringify(insts(c).map(b=>[b.pid,billAmt(b),!!state.cur.paid[b.pid],b.fromAcct])), c.categories.map(k=>k.id+":"+k.name+":"+k.limit).join(","), pgBase(c), c.accounts.map(a=>a.id+":"+a.balance+":"+a.name+":"+a.type).join(",")].join("|");
+  const sig = [NOW, state.readOnly, state.hist.loaded, JSON.stringify(insts(c).map(b=>[b.pid,billAmt(b),!!state.cur.paid[b.pid],b.fromAcct])), c.categories.map(k=>k.id+":"+k.name+":"+(k.limit > 0)).join(","), pgBase(c), c.accounts.map(a=>a.id+":"+a.balance+":"+a.name+":"+a.type).join(",")].join("|");
   if ($("playBody").dataset.sig === sig && $("playBody").querySelector("#pgTot")) return pgUpdate();
   $("playBody").dataset.sig = sig;
   const st = pgState(c);
   const inp = (attr, id, v, label) => `<input class="minput" inputmode="decimal" ${attr}="${esc(id)}" value="${v ? (v/100).toFixed(2) : ""}" placeholder="0" aria-label="${esc(label)}" ${ro}>`;
   const payDef = pgPayDefault(c);
-  let h = `<div class="pgbar" id="pgTot"></div>
-  <div class="pgacc pgled" id="pgSteps" style="margin-top:8px"></div>
-  <div class="pgacc pgled" style="margin-top:8px"><div class="pglr"><span>Next paycheck${ib("Uses your last paycheck filed in Review, or half your planned monthly take-home. Type a different amount to try it.")}</span><input class="minput" inputmode="decimal" data-pginc="pay" value="${st.inc.pay ? (st.inc.pay/100).toFixed(2) : ""}" placeholder="${(payDef/100).toFixed(0)}" aria-label="Next paycheck" ${ro}></div></div>
-  <div class="pgacc" id="pgAccts" style="margin-top:8px"></div>`;
+  let h = `<div class="hero pghero" id="pgTot"></div>
+  <button class="linkbtn" id="pgMathBtn" style="margin:8px 4px 0">${state.pgMath ? "Hide the math" : "Show the math"}</button>
+  <div id="pgMath" ${state.pgMath ? "" : "hidden"}><div class="pgacc pgled" id="pgSteps" style="margin-top:6px"></div>
+  <div class="pgacc pgled" style="margin-top:8px"><div class="pglr"><span>Next paycheck${ib("Uses your last paycheck filed in Review, or half your planned monthly take-home. Type a different amount to try it.")}</span><input class="minput" inputmode="decimal" data-pginc="pay" value="${st.inc.pay ? (st.inc.pay/100).toFixed(2) : ""}" placeholder="${(payDef/100).toFixed(0)}" aria-label="Next paycheck" ${ro}></div></div></div>`;
 
-  if (!state.hist.loaded && !state.hist.pgLoading){ state.hist.pgLoading = true; loadHistory().then(() => { state.hist.pgLoading = false; $("playBody").dataset.sig = ""; if (state.view === "play") renderPlay(); }); }
+  if (debts.length) h += `<h2>${h2t("Pay toward cards", "Comes out of the next paycheck. The number at the top drops as you add payments.")}</h2><div class="list">` + debts.map(a => `<div class="row" style="border-left:4px solid ${acctColor(a)}"><div class="grow" style="min-width:0"><div class="t">${esc(a.name)}</div><div class="m">Owes ${whole(a.balance)}</div></div><div style="text-align:right">${inp("data-pgpay", a.id, st.pay[a.id]||0, "Extra on " + a.name)}<div class="m" data-pgleft="${esc(a.id)}" style="margin-top:4px;font-weight:700"></div></div></div>`).join("") + `</div>`;
+  if (!state.hist.loaded && !state.hist.pgLoading){ state.hist.pgLoading = true; loadHistory().then(() => { state.hist.pgLoading = false; if (state.view !== "play") return;
+    const typing = document.activeElement && document.activeElement.closest && document.activeElement.closest("#playBody");
+    if (typing){ const a = pgActuals(cfg()); $("playBody").querySelectorAll("[data-pgcat]").forEach(el => { const line = el.closest(".row").querySelector(".pgact"); if (line) line.innerHTML = pgActLine(a[el.dataset.pgcat]); }); return; }   // don't rebuild under the cursor
+    $("playBody").dataset.sig = ""; renderPlay(); }); }
   const act = pgActuals(c);
   const bc = c.categories.filter(k => k.limit > 0).concat(c.categories.filter(k => !k.limit && (act[k.id] && (act[k.id].now || act[k.id].avg))));
-  h += `<h2>${h2t("Budgets per month", "Each pay period uses half. Change one to see what it frees up; Save makes it your real budget.")}</h2>`;
-  h += bc.length ? `<div class="list">` + bc.map(k => `<div class="row"><span class="ebub emoji">${esc(k.emoji)}</span><div class="grow" style="min-width:0"><div class="t">${esc(k.name)}</div><div class="m pgact">${pgActLine(act[k.id])}</div><div class="m" data-pgwas="${esc(k.id)}"></div></div>${inp("data-pgcat", k.id, pgCatVal(c,k), k.name + " budget")}</div>`).join("") + `</div>` : `<div class="list"><div class="empty">No budgets yet. Add one in Planner.</div></div>`;
-  h += `<div class="btnrow" id="pgCatBtns" hidden><button class="small-ghost" id="pgReset">Reset</button><button class="small-primary" id="pgSave">Save as my budgets</button></div>`;
-  if (debts.length) h += `<h2>${h2t("Extra card payments", "Paid out of the next paycheck. The bar at the top shows what's left after them.")}</h2><div class="list">` + debts.map(a => `<div class="row" style="border-left:4px solid ${acctColor(a)}"><div class="grow" style="min-width:0"><div class="t">${esc(a.name)}</div><div class="m">Owes ${whole(a.balance)}</div></div><div style="text-align:right">${inp("data-pgpay", a.id, st.pay[a.id]||0, "Extra on " + a.name)}<div class="m" data-pgleft="${esc(a.id)}" style="margin-top:4px;font-weight:700"></div></div></div>`).join("") + `</div>`;
+  h += `<h2>${h2t("Budgets per month", "These are your real budgets: changing one here changes it in Planner and on Home. Each pay period uses half.")}</h2>`;
+  h += bc.length ? `<div class="list">` + bc.map(k => `<div class="row"><span class="ebub emoji">${esc(k.emoji)}</span><div class="grow" style="min-width:0"><div class="t">${esc(k.name)}</div><div class="m pgact">${pgActLine(act[k.id])}</div><div class="m" data-pgwas="${esc(k.id)}"></div></div>${inp("data-pgcat", k.id, k.limit, k.name + " budget")}</div>`).join("") + `</div>` : `<div class="list"><div class="empty">No budgets yet. Add one in Planner.</div></div>`;
+
   $("playBody").innerHTML = h;
   pgUpdate();
 }
@@ -1785,10 +1792,11 @@ function pgUpdate(){
   const startChk = proj[chk.id];
   const b1 = billOut(curBills, false);
   let changed = false, curRemain = 0, nextBud = 0;
+  c.categories.forEach(k => { const el = body.querySelector(`[data-pgcat="${k.id}"]`); if (el && el !== document.activeElement && toCents(el.value) !== k.limit && !pgLimT) el.value = k.limit ? (k.limit/100).toFixed(2) : ""; });
   c.categories.filter(k => body.querySelector(`[data-pgcat="${k.id}"]`)).forEach(k => { const v = val(`[data-pgcat="${k.id}"]`), half = Math.round(v / 2), sp = r.spentBy[k.id] || 0;
     curRemain += Math.max(0, half - sp); nextBud += half;
     const w = body.querySelector(`[data-pgwas="${k.id}"]`); if (v !== k.limit) changed = true;
-    if (w) w.textContent = v !== k.limit ? "was " + whole(k.limit) : ""; });
+    if (w) w.textContent = ""; });
   proj[chk.id] -= curRemain;
   const before = proj[chk.id];
   const pay = val('[data-pginc="pay"]') || pgPayDefault(c);
@@ -1803,7 +1811,9 @@ function pgUpdate(){
     if (out){ out.textContent = !x ? "" : rest <= 0 ? "Paid off" : `${whole(rest)} left`; out.style.color = x && rest <= 0 ? "var(--good)" : ""; } });
   const left = proj[chk.id];
   const t = $("pgTot");
-  if (t){ t.classList.toggle("neg", left < 0); t.innerHTML = `<span>${left < 0 ? "Short after the " + fd(nextPay) + " paycheck" : (extra ? "Left after card payments" : "Free for cards after the " + fd(nextPay) + " paycheck")}</span><b>${whole(Math.abs(left))}</b>`; }
+  if (t){ t.classList.toggle("neg", left < 0);
+    t.innerHTML = `<div class="lbl">${left < 0 ? "Short after the " + fd(nextPay) + " paycheck" : extra ? "Still free after these card payments" : "Free for cards after the " + fd(nextPay) + " paycheck"}</div><div class="big">${left < 0 ? "−" : ""}${whole(Math.abs(left))}</div>
+      <div class="fine">Before payday: <b>${before < 0 ? "−" + whole(-before) : whole(before)}</b>${before < 0 ? " (spending until then goes on cards)" : ""}</div>`; }
   const st = $("pgSteps"), L = (k, v, cls) => `<div class="pglr"${cls ? ` style="${cls}"` : ""}><span>${k}</span><b>${v}</b></div>`, m = v => v ? "−" + whole(v) : whole(0);
   if (st) st.innerHTML = L("Checking now", whole(startChk))
     + L(`Bills before ${fd(nextPay)}`, m(b1)) + L("Rest of this period's budgets", m(curRemain))
@@ -1813,7 +1823,7 @@ function pgUpdate(){
     + (extra ? L("Extra card payments", m(extra)) : "")
     + (bankPaid.size ? `<div class="pglr"><span style="font-size:.78rem">${bankPaid.size} bill${bankPaid.size === 1 ? "" : "s"} already paid per the bank, not counted</span><b></b></div>` : "");
 
-  const al = $("pgAccts"), cash = c.accounts.filter(a=>a.type==="checking"||a.type==="savings"), debts = c.accounts.filter(a=>DEBT.has(a.type));
+  const al = null, cash = c.accounts.filter(a=>a.type==="checking"||a.type==="savings"), debts = c.accounts.filter(a=>DEBT.has(a.type));
   if (al) al.innerHTML = `<div class="pgah"><span>Accounts</span><span>Now</span><span>After</span></div>` + cash.concat(debts).map(a => { const now = a.balance, aft = proj[a.id], d = aft !== now, f = v => DEBT.has(a.type) && v > 0 ? "−" + whole(v) : (v < 0 ? "−" + whole(-v) : whole(v));
     return `<div class="pgar"><span class="nm"><i style="background:${acctColor(a)}"></i>${esc(a.name)}</span><span>${f(now)}</span><b class="${d ? "chg" : ""}">${f(aft)}</b></div>`; }).join("");
   const btns = $("pgCatBtns"); if (btns) btns.hidden = !changed || state.readOnly;
@@ -1829,11 +1839,22 @@ function pgSave(){
   if (JSON.stringify(cur.cats) === JSON.stringify(cats) && JSON.stringify(cur.pay) === JSON.stringify(pay) && JSON.stringify(cur.inc) === JSON.stringify(inc)) return;
   editCfg(c => { c.plan = Object.assign({strategy:"avalanche",total:0,custom:{}}, c.plan||{}); c.plan.pg = {month: NOW, pay, cats, inc}; });
 }
-$("playBody").addEventListener("input", e => { if (!e.target.matches("[data-pgpay],[data-pgcat],[data-pginc]")) return; pgUpdate(); clearTimeout(pgT); pgT = setTimeout(pgSave, 700); });
-$("playBody").addEventListener("change", e => { if (e.target.matches("[data-pgpay],[data-pgcat],[data-pginc]")){ clearTimeout(pgT); pgSave(); } });
+/* Budget edits here are the real budgets (Planner, Home rings); paycheck and extra payments stay what-ifs. */
+let pgLimT = 0;
+function pgSaveLimits(){
+  pgLimT = 0;
+  if (state.readOnly) return;
+  const vals = {}; $("playBody").querySelectorAll("[data-pgcat]").forEach(el => vals[el.dataset.pgcat] = toCents(el.value));
+  const c0 = cfg(); if (!c0.categories.some(k => k.id in vals && vals[k.id] !== k.limit)) return;
+  editCfg(c => { c.categories.forEach(k => { if (k.id in vals) k.limit = vals[k.id]; }); if (c.plan && c.plan.pg) c.plan.pg.cats = {}; });
+}
+$("playBody").addEventListener("input", e => { if (!e.target.matches("[data-pgpay],[data-pgcat],[data-pginc]")) return; pgUpdate();
+  if (e.target.matches("[data-pgcat]")){ clearTimeout(pgLimT); pgLimT = setTimeout(pgSaveLimits, 900); } else { clearTimeout(pgT); pgT = setTimeout(pgSave, 700); } });
+$("playBody").addEventListener("change", e => { if (e.target.matches("[data-pgcat]")){ clearTimeout(pgLimT); pgSaveLimits(); } else if (e.target.matches("[data-pgpay],[data-pginc]")){ clearTimeout(pgT); pgSave(); } });
 $("playBody").addEventListener("click", e => {
+  if (e.target.id === "pgMathBtn"){ state.pgMath = !state.pgMath; $("pgMath").hidden = !state.pgMath; e.target.textContent = state.pgMath ? "Hide the math" : "Show the math"; return; }
   const use = e.target.closest("[data-pguse]");
-  if (use){ const inpEl = use.closest(".row").querySelector("[data-pgcat]"); if (inpEl){ inpEl.value = (+use.dataset.pguse / 100).toFixed(2); pgUpdate(); pgSave(); } return; }
+  if (use){ const inpEl = use.closest(".row").querySelector("[data-pgcat]"); if (inpEl){ inpEl.value = (+use.dataset.pguse / 100).toFixed(2); pgSaveLimits(); pgUpdate(); toast("Budget updated."); } return; }
   if (e.target.id === "pgReset"){ $("playBody").querySelectorAll("[data-pgcat]").forEach(el => { const k = cfg().categories.find(x=>x.id===el.dataset.pgcat); el.value = k && k.limit ? (k.limit/100).toFixed(2) : ""; }); pgUpdate(); pgSave(); }
   if (e.target.id === "pgSave"){
     const body = $("playBody"), vals = {}; body.querySelectorAll("[data-pgcat]").forEach(el => vals[el.dataset.pgcat] = toCents(el.value));
