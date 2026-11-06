@@ -1724,35 +1724,75 @@ function renderPlay(){
   $("playBody").dataset.sig = sig;
   const st = pgState(c);
   const inp = (attr, id, v, label) => `<input class="minput" inputmode="decimal" ${attr}="${esc(id)}" value="${v ? (v/100).toFixed(2) : ""}" placeholder="0" aria-label="${esc(label)}" ${ro}>`;
-  let h = `<div class="pgbar" id="pgTot"></div><div class="pgacc" id="pgAccts" style="margin-top:12px"></div>
-  <div class="pgacc pgled" style="margin-top:8px"><div class="pglr"><span>Paycheck coming</span>${inp("data-pginc","pay",st.inc.pay||0,"Paycheck coming")}</div></div>`;
+  const payDef = pgPayDefault(c);
+  let h = `<div class="pgbar" id="pgTot"></div>
+  <div class="pgacc pgled" id="pgSteps" style="margin-top:8px"></div>
+  <div class="pgacc pgled" style="margin-top:8px"><div class="pglr"><span>Next paycheck${ib("Uses your last paycheck filed in Review, or half your planned monthly take-home. Type a different amount to try it.")}</span><input class="minput" inputmode="decimal" data-pginc="pay" value="${st.inc.pay ? (st.inc.pay/100).toFixed(2) : ""}" placeholder="${(payDef/100).toFixed(0)}" aria-label="Next paycheck" ${ro}></div></div>
+  <div class="pgacc" id="pgAccts" style="margin-top:8px"></div>`;
 
   const bc = c.categories.filter(k => k.limit > 0);
-  h += `<h2>Budgets</h2>`;
+  h += `<h2>${h2t("Budgets per month", "Each pay period uses half. Change one to see what it frees up; Save makes it your real budget.")}</h2>`;
   h += bc.length ? `<div class="list">` + bc.map(k => `<div class="row"><span class="ebub emoji">${esc(k.emoji)}</span><div class="grow" style="min-width:0"><div class="t">${esc(k.name)}</div><div class="m" data-pgwas="${esc(k.id)}"></div></div>${inp("data-pgcat", k.id, pgCatVal(c,k), k.name + " budget")}</div>`).join("") + `</div>` : `<div class="list"><div class="empty">No budgets yet. Add one in Planner.</div></div>`;
   h += `<div class="btnrow" id="pgCatBtns" hidden><button class="small-ghost" id="pgReset">Reset</button><button class="small-primary" id="pgSave">Save as my budgets</button></div>`;
-  if (debts.length) h += `<h2>Extra payments</h2><div class="list">` + debts.map(a => `<div class="row" style="border-left:4px solid ${acctColor(a)}"><div class="grow" style="min-width:0"><div class="t">${esc(a.name)}</div><div class="m">Owes ${whole(a.balance)}</div></div><div style="text-align:right">${inp("data-pgpay", a.id, st.pay[a.id]||0, "Extra on " + a.name)}<div class="m" data-pgleft="${esc(a.id)}" style="margin-top:4px;font-weight:700"></div></div></div>`).join("") + `</div>`;
+  if (debts.length) h += `<h2>${h2t("Extra card payments", "Paid out of the next paycheck. The bar at the top shows what's left after them.")}</h2><div class="list">` + debts.map(a => `<div class="row" style="border-left:4px solid ${acctColor(a)}"><div class="grow" style="min-width:0"><div class="t">${esc(a.name)}</div><div class="m">Owes ${whole(a.balance)}</div></div><div style="text-align:right">${inp("data-pgpay", a.id, st.pay[a.id]||0, "Extra on " + a.name)}<div class="m" data-pgleft="${esc(a.id)}" style="margin-top:4px;font-weight:700"></div></div></div>`).join("") + `</div>`;
   $("playBody").innerHTML = h;
   pgUpdate();
 }
+/* Last real paycheck filed in Review (within ~40 days), else half the planned take-home. */
+function pgPayDefault(c){
+  const d = (c.deposits||[]).filter(x => !x.kind && x.wages > 0 && x.ts > Date.now() - 40*DAY_MS).sort((a, b) => b.ts - a.ts)[0];
+  return d ? d.wages : Math.round((c.income||0) / 2);
+}
+/* Playground, per paycheck:
+   1) until payday: checking now - bills still due this period - what's left of this period's half-budgets
+   2) next period: + next paycheck - its bills - savings (mid-month check) - its half-budgets  = free for cards
+   Bills whose payment the bank already shows (waiting in Review) aren't subtracted again. */
 function pgUpdate(){
-  const c = cfg(), r = calc(), body = $("playBody"), chk = pgChk(c); if (!chk) return;
+  const c = cfg(), r = calcP(), body = $("playBody"), chk = pgChk(c); if (!chk) return;
   const val = sel => { const el = body.querySelector(sel); return el ? toCents(el.value) : 0; };
   const src = defaultPayFrom(c) || chk.id;
   const proj = {}; c.accounts.forEach(a => proj[a.id] = a.balance);
   const move = (id, amt) => { const a = c.accounts.find(x=>x.id===id); if (!a || !amt) return; proj[id] += DEBT.has(a.type) ? amt : (a.type === "reimb" ? 0 : -amt); };
-  insts(c).filter(b => !state.cur.paid[b.pid]).forEach(b => { const amt = billAmt(b), from = b.fromAcct === "none" ? "" : (b.fromAcct || src); if (from) move(from, amt); if (b.cardOf && b.cardOf !== from) move(b.cardOf, -amt); });
-  proj[chk.id] += val('[data-pginc="pay"]');
-  let changed = false;
-  c.categories.filter(k => k.limit > 0).forEach(k => { const v = val(`[data-pgcat="${k.id}"]`), sp = r.spentBy[k.id] || 0; proj[chk.id] -= Math.max(0, v - sp);
+  const fd = d => d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
+  const now = new Date(), t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()), y = t0.getFullYear(), mo = t0.getMonth();
+  const mid = payDate(y, mo, 15), end = payDate(y, mo, new Date(y, mo + 1, 0).getDate()), two = t0 >= mid, nextPay = two ? end : mid;
+  const nk = shiftKey(NOW, 1), nd = keyToDate(nk), nmid = payDate(nd.getFullYear(), nd.getMonth(), 15);
+  const bankPaid = new Set(); state.bankNew.forEach(b => { if (billMonth(b) !== NOW) return; const x = bankBill(c, b, bankPaid); if (x && x.strong) bankPaid.add(x.pid); });
+  const open = b => !state.cur.paid[b.pid] && !bankPaid.has(b.pid);
+  const curBills = insts(c).filter(b => (two ? b.day >= mid.getDate() : b.day < mid.getDate()) && open(b));
+  const nextBills = two ? insts(c, nk).filter(b => b.day < nmid.getDate()) : insts(c).filter(b => b.day >= mid.getDate() && open(b));
+  const billOut = (list, future) => list.reduce((sum, b) => { const amt = future ? b.amount : billAmt(b), from = b.fromAcct === "none" ? "" : (b.fromAcct || src); if (from) move(from, amt); if (b.cardOf && b.cardOf !== from) move(b.cardOf, -amt); return sum + (from === chk.id ? amt : 0); }, 0);
+  const startChk = proj[chk.id];
+  const b1 = billOut(curBills, false);
+  let changed = false, curRemain = 0, nextBud = 0;
+  c.categories.filter(k => k.limit > 0).forEach(k => { const v = val(`[data-pgcat="${k.id}"]`), half = Math.round(v / 2), sp = r.spentBy[k.id] || 0;
+    curRemain += Math.max(0, half - sp); nextBud += half;
     const w = body.querySelector(`[data-pgwas="${k.id}"]`); if (v !== k.limit) changed = true;
     if (w) w.textContent = v !== k.limit ? "was " + whole(k.limit) : ""; });
-  c.accounts.filter(a=>DEBT.has(a.type)).forEach(a => { const x = val(`[data-pgpay="${a.id}"]`); move(chk.id, x); move(a.id, -x);
+  proj[chk.id] -= curRemain;
+  const before = proj[chk.id];
+  const pay = val('[data-pginc="pay"]') || pgPayDefault(c);
+  proj[chk.id] += pay;
+  const b2 = billOut(nextBills, two);
+  const sav = two ? 0 : (c.savings || 0);
+  proj[chk.id] -= sav + nextBud;
+  const free = proj[chk.id];
+  let extra = 0;
+  c.accounts.filter(a=>DEBT.has(a.type)).forEach(a => { const x = val(`[data-pgpay="${a.id}"]`); extra += x; move(chk.id, x); move(a.id, -x);
     const out = body.querySelector(`[data-pgleft="${a.id}"]`), rest = proj[a.id];
     if (out){ out.textContent = !x ? "" : rest <= 0 ? "Paid off" : `${whole(rest)} left`; out.style.color = x && rest <= 0 ? "var(--good)" : ""; } });
   const left = proj[chk.id];
   const t = $("pgTot");
-  if (t){ t.classList.toggle("neg", left < 0); t.innerHTML = `<span>${left < 0 ? "Short this month" : "Surplus this month"}</span><b>${whole(Math.abs(left))}</b>`; }
+  if (t){ t.classList.toggle("neg", left < 0); t.innerHTML = `<span>${left < 0 ? "Short after the " + fd(nextPay) + " paycheck" : (extra ? "Left after card payments" : "Free for cards after the " + fd(nextPay) + " paycheck")}</span><b>${whole(Math.abs(left))}</b>`; }
+  const st = $("pgSteps"), L = (k, v, cls) => `<div class="pglr"${cls ? ` style="${cls}"` : ""}><span>${k}</span><b>${v}</b></div>`, m = v => v ? "−" + whole(v) : whole(0);
+  if (st) st.innerHTML = L("Checking now", whole(startChk))
+    + L(`Bills before ${fd(nextPay)}`, m(b1)) + L("Rest of this period's budgets", m(curRemain))
+    + L(`<b style="color:var(--ink)">Before payday</b>`, `<span style="color:${before < 0 ? "var(--warn)" : "var(--ink)"}">${before < 0 ? "−" + whole(-before) : whole(before)}</span>`, "border-top:1.5px solid var(--line)")
+    + L(`${fd(nextPay)} paycheck`, "+" + whole(pay)) + L(`Bills ${two ? "early next month" : "rest of the month"}`, m(b2))
+    + (sav ? L("Savings", m(sav)) : "") + L("Next period's budgets", m(nextBud))
+    + (extra ? L("Extra card payments", m(extra)) : "")
+    + (bankPaid.size ? `<div class="pglr"><span style="font-size:.78rem">${bankPaid.size} bill${bankPaid.size === 1 ? "" : "s"} already paid per the bank, not counted</span><b></b></div>` : "");
+
   const al = $("pgAccts"), cash = c.accounts.filter(a=>a.type==="checking"||a.type==="savings"), debts = c.accounts.filter(a=>DEBT.has(a.type));
   if (al) al.innerHTML = `<div class="pgah"><span>Accounts</span><span>Now</span><span>After</span></div>` + cash.concat(debts).map(a => { const now = a.balance, aft = proj[a.id], d = aft !== now, f = v => DEBT.has(a.type) && v > 0 ? "−" + whole(v) : (v < 0 ? "−" + whole(-v) : whole(v));
     return `<div class="pgar"><span class="nm"><i style="background:${acctColor(a)}"></i>${esc(a.name)}</span><span>${f(now)}</span><b class="${d ? "chg" : ""}">${f(aft)}</b></div>`; }).join("");
