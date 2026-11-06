@@ -78,7 +78,11 @@ button{cursor:pointer}
 .hero{background:var(--accent);color:#fff;border-radius:24px;padding:20px 20px 18px;position:relative;overflow:hidden;
   background-image:linear-gradient(140deg,rgba(255,255,255,.22) 0%,rgba(255,255,255,.06) 45%,rgba(0,0,0,.10) 100%);
   box-shadow:0 14px 30px -14px rgba(16,24,40,.55),0 2px 6px -2px rgba(16,24,40,.18),inset 0 1px 0 rgba(255,255,255,.28)}
-.hero::after{content:"";position:absolute;right:-60px;top:-70px;width:220px;height:220px;border-radius:50%;background:radial-gradient(closest-side,rgba(255,255,255,.18),rgba(255,255,255,0));pointer-events:none}
+.hero::after{content:"";position:absolute;left:calc(var(--gx,88%) - 110px);top:calc(var(--gy,0%) - 110px);width:220px;height:220px;border-radius:50%;background:radial-gradient(closest-side,rgba(255,255,255,var(--ga,.18)),rgba(255,255,255,0));pointer-events:none;transition:left .4s ease,top .4s ease}
+.hero{transform:perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) scale(var(--sc,1));transition:transform .45s cubic-bezier(.2,.9,.25,1.25),box-shadow .45s ease;will-change:transform;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.hero.tilt{transition:transform .12s ease-out,box-shadow .2s ease;box-shadow:0 22px 40px -16px rgba(16,24,40,.6),0 4px 10px -4px rgba(16,24,40,.2),inset 0 1px 0 rgba(255,255,255,.3)}
+.hero.tilt::after{transition:none;--ga:.32}
+@media (prefers-reduced-motion: reduce){.hero{transform:none !important}}
 .hero > *{position:relative;z-index:1}
 .hbills{background-color:#7A5AF8}
 .hplan{background-color:#0E9384}
@@ -2739,6 +2743,28 @@ $("sheetForm").addEventListener("submit", e => {
   $("sheet").close();
 });
 $("sheet").addEventListener("click", e => { if (e.target === $("sheet")) $("sheet").close(); });
+
+/* ---------------- header cards tilt toward your finger while held ---------------- */
+(function(){
+  if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  let card = null, rect = null;
+  const set = e => {
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)), y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    card.style.setProperty("--ry", ((x - .5) * 14).toFixed(2) + "deg");
+    card.style.setProperty("--rx", ((.5 - y) * 12).toFixed(2) + "deg");
+    card.style.setProperty("--gx", (x * 100).toFixed(1) + "%"); card.style.setProperty("--gy", (y * 100).toFixed(1) + "%");
+  };
+  const end = () => { if (!card) return; const c = card; card = null;
+    c.classList.remove("tilt"); ["--rx","--ry","--sc","--gx","--gy"].forEach(k => c.style.removeProperty(k)); };
+  document.addEventListener("pointerdown", e => {
+    const c = e.target.closest(".hero"); if (!c || e.target.closest("button,a,input,select")) return;
+    card = c; rect = c.getBoundingClientRect(); c.classList.add("tilt"); c.style.setProperty("--sc", ".985"); set(e);
+    if (navigator.vibrate) try{ navigator.vibrate(6); }catch(_){}
+  }, {passive:true});
+  document.addEventListener("pointermove", e => { if (card) set(e); }, {passive:true});
+  ["pointerup","pointercancel","blur"].forEach(t => (t === "blur" ? window : document).addEventListener(t, end));
+  document.addEventListener("scroll", end, {passive:true, capture:true});
+})();
 
 /* ---------------- info popover ---------------- */
 document.addEventListener("click", e => {
