@@ -590,6 +590,8 @@ const acctColor = a => a.color || ACCT_COLORS[Math.abs([...String(a.id)].reduce(
 const ACCT_EMOJI = ["🏦","💳","💰","🐷","📈","🛋️","🧾","💵"];
 const ACCT_TYPES = [["checking","Checking"],["savings","Savings"],["credit","Credit card"],["loan","Loan or BNPL"],["reimb","Owed to me"]];
 const DEBT = new Set(["credit","loan"]);
+/* A category named "Work…" (e.g. "Work Expense") always means a Horizon expense: owed to you, never from the allowance. */
+const isWorkCat = k => !!k && /\bwork\b/i.test(k.name || "");
 const EMOJI_BY_ID = {groceries:"🛒",eating:"🍔",gas:"⛽",other:"📦",household:"🏠"};
 
 const SUGGESTED_OTHER = [
@@ -666,8 +668,8 @@ function unsub(name){ if (subs[name]){ subs[name](); delete subs[name]; } }
 function subscribeAll(){
   if (state.mode === "db"){
     unsub("cfg"); unsub("tx"); unsub("paid");
-    subs.cfg = db.doc("settings/main").onSnapshot(s => { state.raw = s.exists ? s.data() : null; renderAll(); if (!state.cfgSeen && !s.metadata.fromCache){ state.cfgSeen = true; setTimeout(bankAuto, 800); } }, ()=>{});
-    subs.tx = db.collection("tx").where("month","==",NOW).onSnapshot(s => { state.cur.tx = s.docs.map(d=>Object.assign({id:d.id},d.data())); renderAll(); }, ()=>{});
+    subs.cfg = db.doc("settings/main").onSnapshot(s => { state.raw = s.exists ? s.data() : null; renderAll(); fixWorkCat(); if (!state.cfgSeen && !s.metadata.fromCache){ state.cfgSeen = true; setTimeout(bankAuto, 800); } }, ()=>{});
+    subs.tx = db.collection("tx").where("month","==",NOW).onSnapshot(s => { state.cur.tx = s.docs.map(d=>Object.assign({id:d.id},d.data())); renderAll(); fixWorkCat(); }, ()=>{});
     subs.paid = db.doc("paid/"+NOW).onSnapshot(s => { state.cur.paid = s.exists ? Object.assign({}, s.data()) : {}; state.paidLoaded = true; renderAll(); }, ()=>{});
     unsub("bank");
     subs.bank = db.collection("bank").where("status","==","new").onSnapshot(s => { state.bankNew = s.docs.map(d=>Object.assign({id:d.id},d.data())); renderAll(); }, ()=>{});
@@ -680,6 +682,7 @@ function subscribeAll(){
     state.paidLoaded = true;
     renderAll();
     if (!state.cfgSeen){ state.cfgSeen = true; setTimeout(bankAuto, 800); }
+    fixWorkCat();
   }
   subscribeView();
 }
@@ -766,6 +769,15 @@ const store = {
     return (lsRead().bank||[]).find(b=>b.id===id) || null;
   }
 };
+/* This month's purchases filed under the Work category before it counted as work: move them to Horizon. */
+function fixWorkCat(){
+  if (state.readOnly || state.mode === "loading" || !state.raw) return;
+  const c = cfg(), wk = new Set(c.categories.filter(isWorkCat).map(k => k.id));
+  const todo = state.cur.tx.filter(t => !t.work && wk.has(t.cat)); if (!todo.length) return;
+  editCfg(x => todo.forEach(t => { applyTx(x, t, -1); applyTx(x, Object.assign({}, t, {work:true}), 1); }));
+  todo.forEach(t => store.updTx(Object.assign({}, t, {work:true})));
+  toast(`${todo.length} Work Expense item${todo.length===1?"":"s"} moved to Owed by Horizon.`);
+}
 function editCfg(mut){ const c = cfg(); mut(c); store.saveCfg(c); }
 
 /* ---------------- live balances ---------------- */
@@ -1152,10 +1164,10 @@ $("addBtn").addEventListener("click", () => {
   else if (ds && ds !== todayStr()){ const [y,m,d] = ds.split("-").map(Number); ts = new Date(y, m-1, d, 12).getTime(); }
   const month = monthKey(new Date(ts));
   if (ed){
-    const t = Object.assign({}, ed, {amt, cat:k.id, catName:k.name, note:$("noteIn").value.trim(), acct:state.selAcct||"", ts, month, work: state.selKind === "work"});
+    const t = Object.assign({}, ed, {amt, cat:k.id, catName:k.name, note:$("noteIn").value.trim(), acct:state.selAcct||"", ts, month, work: state.selKind === "work" || isWorkCat(k)});
     $("addSheet").close(); state.editTx = null; editCfg(c => { applyTx(c, ed, -1); applyTx(c, t, 1); }); store.updTx(t); toast("Transaction updated. Balances adjusted."); return;
   }
-  const t = {id:uid(), amt, cat:k.id, catName:k.name, note:$("noteIn").value.trim(), acct:state.selAcct||"", ts, month, work: state.selKind === "work"};
+  const t = {id:uid(), amt, cat:k.id, catName:k.name, note:$("noteIn").value.trim(), acct:state.selAcct||"", ts, month, work: state.selKind === "work" || isWorkCat(k)};
   $("addSheet").close();
   let after = null; editCfg(c => { applyTx(c, t, 1); after = c; });
   if (month === NOW) store.addTx(t);
@@ -2086,8 +2098,8 @@ function bankResolve(b, choice, quiet){
     toast(b.amt < 0 ? "Left out of the budget. Balances still come from the bank." : "Skipped. Transfers and card payments don't count as spending.");
     return;
   }
-  const work = choice === "work";
-  const k = work ? (c.categories.find(x=>x.id==="other") || c.categories[0]) : c.categories.find(x => "c:"+x.id === choice);
+  const picked = c.categories.find(x => "c:"+x.id === choice), work = choice === "work" || isWorkCat(picked);
+  const k = choice === "work" ? (c.categories.find(isWorkCat) || c.categories.find(x=>x.id==="other") || c.categories[0]) : picked;
   if (!k) return;
   const t = {id:b.id, amt:b.amt, cat:k.id, catName:k.name, note:niceDesc(b.desc), acct:c.accounts.find(a=>a.id===b.acct) ? b.acct : "", ts:bankTs(b), month:monthKey(new Date(bankTs(b))), work, bank:b.id};
   let after = null;
@@ -2111,7 +2123,7 @@ function bankTxForm(t){
     saveLabel:"Save",
     onSave: v => {
       const k = c.categories.find(x=>x.id===v.cat); if (!k) return "Pick a category.";
-      const nt = Object.assign({}, t, {cat:k.id, catName:k.name, work:v.kind === "work"}), key = merchKey(t.note);
+      const nt = Object.assign({}, t, {cat:k.id, catName:k.name, work:v.kind === "work" || isWorkCat(k)}), key = merchKey(t.note);
       editCfg(x => { applyTx(x, t, -1); applyTx(x, nt, 1); learn(x, key, nt.work ? "@work" : k.id, t.work ? "@work" : t.cat); });
       store.updTx(nt); toast("Updated.");
     },
