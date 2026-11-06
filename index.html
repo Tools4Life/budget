@@ -1332,6 +1332,7 @@ function renderActivity(){
     });
     if (open) html += "</div>";
   }
+  if (!state.readOnly && isNow) html += `<button class="ghost" id="addCash">+ Add a cash expense</button>`;
   html += `<button class="ghost" id="exportCsv" style="border-style:solid">Export ${esc(label)} as CSV</button>`;
   $("activityBody").innerHTML = html;
 }
@@ -1342,6 +1343,7 @@ $("activityBody").addEventListener("click", async e => {
   const xp = e.target.closest("[data-xpay]"); if (xp) return xpayView(xp.dataset.xpay);
   const dp = e.target.closest("[data-dep]"); if (dp) return depForm(dp.dataset.dep);
   const br = e.target.closest("[data-billrow]"); if (br) return billPaidView(br.dataset.billrow, state.viewMonth);
+  if (e.target.id === "addCash") return openAdd();
   if (e.target.id === "exportCsv") exportCsv();
 });
 async function exportCsv(){
@@ -2751,7 +2753,7 @@ function renderAll(){
   renderHeader();
   if (state.view === "home") renderHome();
   if ($("addSheet").open) renderChips();
-  $("topAdd").hidden = state.readOnly || state.mode === "loading";
+  $("topAdd").hidden = true;   // everything comes from the bank; cash expenses: Activity link or tap a budget ring
   if (state.view === "activity") renderActivity();
   if (state.view === "accounts") renderAccounts();
   if (state.view === "horizon") renderHorizon();
