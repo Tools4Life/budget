@@ -803,6 +803,7 @@ const store = {
   },
   bankSet(b, patch){
     const nb = Object.assign({}, b, patch);
+    if (state.rfOpen){ clearTimeout(state.rfT); state.rfT = setTimeout(loadFiled, 400); }   // keep Recently filed current
     state.bankNew = state.bankNew.filter(x=>x.id!==b.id).concat(nb.status === "new" ? [nb] : []);
     renderAll();
     if (state.mode === "db"){ const {id, ...body} = nb; return db.collection("bank").doc(id).set(body).catch(writeErr); }
