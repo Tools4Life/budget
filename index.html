@@ -374,6 +374,7 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 /* bank sync (SimpleFIN) */
 .navbtn .nbadge{margin-left:auto;min-width:22px;height:22px;border-radius:11px;background:var(--accent);color:#fff;font-size:.75rem;font-weight:800;display:grid;place-items:center;padding:0 6px}
 .nbadge[hidden]{display:none}
+.pgact{white-space:normal !important}
 .hero .ibtn{border-color:rgba(255,255,255,.55);color:#fff;background:transparent;width:20px;height:20px;vertical-align:-4px}
 .ibtn{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line);background:var(--bg);color:var(--muted);font:italic 700 .78rem/1 Georgia,"Times New Roman",serif;padding:0;margin-left:7px;flex:none;cursor:pointer;vertical-align:1px}
 .ibtn:hover{border-color:var(--muted);color:var(--ink)}
@@ -1719,7 +1720,7 @@ function renderPlay(){
   const c = cfg(), r = calc(), ro = state.readOnly ? "disabled" : "", chk = pgChk(c);
   const debts = c.accounts.filter(a=>DEBT.has(a.type)).sort((a,b)=>(a.type==="credit"?0:1)-(b.type==="credit"?0:1));
   if (!chk){ $("playBody").dataset.sig = ""; $("playBody").innerHTML = `<div class="list"><div class="empty">Add your Checking account on Accounts first.</div></div>`; return; }
-  const sig = [NOW, state.readOnly, JSON.stringify(insts(c).map(b=>[b.pid,billAmt(b),!!state.cur.paid[b.pid],b.fromAcct])), c.categories.map(k=>k.id+":"+k.name+":"+k.limit).join(","), pgBase(c), c.accounts.map(a=>a.id+":"+a.balance+":"+a.name+":"+a.type).join(",")].join("|");
+  const sig = [NOW, state.readOnly, state.hist.loaded, JSON.stringify(insts(c).map(b=>[b.pid,billAmt(b),!!state.cur.paid[b.pid],b.fromAcct])), c.categories.map(k=>k.id+":"+k.name+":"+k.limit).join(","), pgBase(c), c.accounts.map(a=>a.id+":"+a.balance+":"+a.name+":"+a.type).join(",")].join("|");
   if ($("playBody").dataset.sig === sig && $("playBody").querySelector("#pgTot")) return pgUpdate();
   $("playBody").dataset.sig = sig;
   const st = pgState(c);
@@ -1730,9 +1731,11 @@ function renderPlay(){
   <div class="pgacc pgled" style="margin-top:8px"><div class="pglr"><span>Next paycheck${ib("Uses your last paycheck filed in Review, or half your planned monthly take-home. Type a different amount to try it.")}</span><input class="minput" inputmode="decimal" data-pginc="pay" value="${st.inc.pay ? (st.inc.pay/100).toFixed(2) : ""}" placeholder="${(payDef/100).toFixed(0)}" aria-label="Next paycheck" ${ro}></div></div>
   <div class="pgacc" id="pgAccts" style="margin-top:8px"></div>`;
 
-  const bc = c.categories.filter(k => k.limit > 0);
+  if (!state.hist.loaded && !state.hist.pgLoading){ state.hist.pgLoading = true; loadHistory().then(() => { state.hist.pgLoading = false; $("playBody").dataset.sig = ""; if (state.view === "play") renderPlay(); }); }
+  const act = pgActuals(c);
+  const bc = c.categories.filter(k => k.limit > 0).concat(c.categories.filter(k => !k.limit && (act[k.id] && (act[k.id].now || act[k.id].avg))));
   h += `<h2>${h2t("Budgets per month", "Each pay period uses half. Change one to see what it frees up; Save makes it your real budget.")}</h2>`;
-  h += bc.length ? `<div class="list">` + bc.map(k => `<div class="row"><span class="ebub emoji">${esc(k.emoji)}</span><div class="grow" style="min-width:0"><div class="t">${esc(k.name)}</div><div class="m" data-pgwas="${esc(k.id)}"></div></div>${inp("data-pgcat", k.id, pgCatVal(c,k), k.name + " budget")}</div>`).join("") + `</div>` : `<div class="list"><div class="empty">No budgets yet. Add one in Planner.</div></div>`;
+  h += bc.length ? `<div class="list">` + bc.map(k => `<div class="row"><span class="ebub emoji">${esc(k.emoji)}</span><div class="grow" style="min-width:0"><div class="t">${esc(k.name)}</div><div class="m pgact">${pgActLine(act[k.id])}</div><div class="m" data-pgwas="${esc(k.id)}"></div></div>${inp("data-pgcat", k.id, pgCatVal(c,k), k.name + " budget")}</div>`).join("") + `</div>` : `<div class="list"><div class="empty">No budgets yet. Add one in Planner.</div></div>`;
   h += `<div class="btnrow" id="pgCatBtns" hidden><button class="small-ghost" id="pgReset">Reset</button><button class="small-primary" id="pgSave">Save as my budgets</button></div>`;
   if (debts.length) h += `<h2>${h2t("Extra card payments", "Paid out of the next paycheck. The bar at the top shows what's left after them.")}</h2><div class="list">` + debts.map(a => `<div class="row" style="border-left:4px solid ${acctColor(a)}"><div class="grow" style="min-width:0"><div class="t">${esc(a.name)}</div><div class="m">Owes ${whole(a.balance)}</div></div><div style="text-align:right">${inp("data-pgpay", a.id, st.pay[a.id]||0, "Extra on " + a.name)}<div class="m" data-pgleft="${esc(a.id)}" style="margin-top:4px;font-weight:700"></div></div></div>`).join("") + `</div>`;
   $("playBody").innerHTML = h;
@@ -1747,6 +1750,24 @@ function pgPayDefault(c){
    1) until payday: checking now - bills still due this period - what's left of this period's half-budgets
    2) next period: + next paycheck - its bills - savings (mid-month check) - its half-budgets  = free for cards
    Bills whose payment the bank already shows (waiting in Review) aren't subtracted again. */
+/* What you actually spend per category: this month so far, last month, and the average of up to 3 full months with any spending. */
+function pgActuals(c){
+  const out = {}, get = id => (out[id] = out[id] || {now:0, last:0, avg:0, n:0, sum:0, lastKey:shiftKey(NOW, -1)});
+  state.cur.tx.forEach(t => { if (!t.work) get(t.cat).now += t.amt; });
+  [1, 2, 3].map(i => shiftKey(NOW, -i)).forEach(m => {
+    const by = {}; (state.hist.months[m] || []).forEach(t => { if (!t.work) by[t.cat] = (by[t.cat] || 0) + t.amt; });
+    Object.entries(by).forEach(([id, v]) => { const o = get(id); if (m === o.lastKey) o.last = v; if (v > 0){ o.sum += v; o.n++; } });
+  });
+  // average only over months that category actually had spending (a month with no gas logged is a tracking gap, not $0 gas)
+  Object.values(out).forEach(o => { o.avg = o.n ? Math.round(o.sum / o.n) : 0; });
+  return out;
+}
+function pgActLine(a){
+  if (!state.hist.loaded) return "Loading what you've spent…";
+  if (!a) return "Nothing spent yet";
+  const lm = keyToDate(a.lastKey).toLocaleString("en-US",{month:"short"});
+  return `This month ${whole(a.now)} • ${lm} ${whole(a.last)}${a.n > 1 ? ` • ${a.n}-mo avg ${whole(a.avg)}` : ""}${a.avg ? ` <button class="linkbtn" data-pguse="${Math.round(a.avg / 1000) * 1000}" style="padding:0 0 0 4px;font-size:.8rem">Use ${a.n > 1 ? "avg" : lm}</button>` : ""}`;
+}
 function pgUpdate(){
   const c = cfg(), r = calcP(), body = $("playBody"), chk = pgChk(c); if (!chk) return;
   const val = sel => { const el = body.querySelector(sel); return el ? toCents(el.value) : 0; };
@@ -1765,7 +1786,7 @@ function pgUpdate(){
   const startChk = proj[chk.id];
   const b1 = billOut(curBills, false);
   let changed = false, curRemain = 0, nextBud = 0;
-  c.categories.filter(k => k.limit > 0).forEach(k => { const v = val(`[data-pgcat="${k.id}"]`), half = Math.round(v / 2), sp = r.spentBy[k.id] || 0;
+  c.categories.filter(k => body.querySelector(`[data-pgcat="${k.id}"]`)).forEach(k => { const v = val(`[data-pgcat="${k.id}"]`), half = Math.round(v / 2), sp = r.spentBy[k.id] || 0;
     curRemain += Math.max(0, half - sp); nextBud += half;
     const w = body.querySelector(`[data-pgwas="${k.id}"]`); if (v !== k.limit) changed = true;
     if (w) w.textContent = v !== k.limit ? "was " + whole(k.limit) : ""; });
@@ -1812,6 +1833,8 @@ function pgSave(){
 $("playBody").addEventListener("input", e => { if (!e.target.matches("[data-pgpay],[data-pgcat],[data-pginc]")) return; pgUpdate(); clearTimeout(pgT); pgT = setTimeout(pgSave, 700); });
 $("playBody").addEventListener("change", e => { if (e.target.matches("[data-pgpay],[data-pgcat],[data-pginc]")){ clearTimeout(pgT); pgSave(); } });
 $("playBody").addEventListener("click", e => {
+  const use = e.target.closest("[data-pguse]");
+  if (use){ const inpEl = use.closest(".row").querySelector("[data-pgcat]"); if (inpEl){ inpEl.value = (+use.dataset.pguse / 100).toFixed(2); pgUpdate(); pgSave(); } return; }
   if (e.target.id === "pgReset"){ $("playBody").querySelectorAll("[data-pgcat]").forEach(el => { const k = cfg().categories.find(x=>x.id===el.dataset.pgcat); el.value = k && k.limit ? (k.limit/100).toFixed(2) : ""; }); pgUpdate(); pgSave(); }
   if (e.target.id === "pgSave"){
     const body = $("playBody"), vals = {}; body.querySelectorAll("[data-pgcat]").forEach(el => vals[el.dataset.pgcat] = toCents(el.value));
