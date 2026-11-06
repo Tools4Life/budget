@@ -374,6 +374,7 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 /* bank sync (SimpleFIN) */
 .navbtn .nbadge{margin-left:auto;min-width:22px;height:22px;border-radius:11px;background:var(--accent);color:#fff;font-size:.75rem;font-weight:800;display:grid;place-items:center;padding:0 6px}
 .nbadge[hidden]{display:none}
+.hero .ibtn{border-color:rgba(255,255,255,.55);color:#fff;background:transparent;width:20px;height:20px;vertical-align:-4px}
 .ibtn{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line);background:var(--bg);color:var(--muted);font:italic 700 .78rem/1 Georgia,"Times New Roman",serif;padding:0;margin-left:7px;flex:none;cursor:pointer;vertical-align:1px}
 .ibtn:hover{border-color:var(--muted);color:var(--ink)}
 .h2t{display:inline-flex;align-items:center}
@@ -881,7 +882,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") closeNav(); 
 
 /* ---------------- render: header ---------------- */
 function renderHeader(){
-  const r = calc();
+  const r = calcP();
   $("leftAmt").textContent = state.mode === "loading" ? "—" : signed(r.left);
   $("leftPill").classList.toggle("neg", r.left < 0);
   $("modeNote").textContent = state.mode === "local" ? "Saved on this device. Back up monthly in Settings." : state.readOnly ? "View only." : "";
@@ -894,16 +895,16 @@ function ringSvg(pct){
 }
 function addBtnHtml(){ return state.readOnly ? "" : `<div class="herobtns"><button class="addtx" data-addtx><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> Add expense</button></div>`; }
 function renderHome(){
-  const r = calc(), c = r.c;
+  const r = calcP(), c = r.c;
   const mo = keyToDate(NOW).toLocaleString("en-US",{month:"long"});
   let html;
   if (r.hasIncome){
     const used = r.available > 0 ? Math.min(1, r.spent / r.available) : 1;
     html = `<div class="hcol hleft"><div class="hero ${r.left<0?"neg":""}">
-      <div class="lbl">${r.left<0 ? "Over allowance for " + mo : "Allowance left in " + mo}</div>
+      <div class="lbl">${r.period ? (r.left < 0 ? "Over allowance this paycheck" : "Allowance left this paycheck") : (r.left<0 ? "Over allowance for " + mo : "Allowance left in " + mo)}</div>
       <div class="big">${r.left<0 ? "−"+whole(-r.left) : whole(r.left)}</div>
       <div class="meter"><i style="width:${(used*100).toFixed(1)}%"></i></div>
-      <div class="fine">${payLine(r)}</div>
+      <div class="fine">${r.period ? periodLine(r) : payLine(r)}</div>
       ${addBtnHtml()}
     </div>`;
   } else {
@@ -915,16 +916,16 @@ function renderHome(){
       ${addBtnHtml()}
     </div>`;
   }
-  const elapsed = new Date().getDate() / daysIn(NOW);
-  html += `<h2>Budgets ${r.tracked.length ? `<button class="sharebtn" id="shareSnap" aria-label="Share a budget snapshot">Share ↗</button>` : ""}</h2>`;
+  const elapsed = r.period ? r.elapsed : new Date().getDate() / daysIn(NOW), lim = r.limitOf;
+  html += `<h2>${r.period ? h2t("Budgets", "Each category gets half its monthly amount per paycheck, and resets on payday. Monthly amounts are set in Planner.") : "Budgets"} ${r.tracked.length ? `<button class="sharebtn" id="shareSnap" aria-label="Share a budget snapshot">Share ↗</button>` : ""}</h2>`;
   if (!r.tracked.length) html += `<div class="list"><div class="empty">No budgets yet. In Planner, give any category a monthly amount and it shows up here as a ring.</div></div>`;
   else html += `<div class="rings strip">` + r.tracked.map(k => {
-    const sp = r.spentBy[k.id]||0, rem = k.limit - sp, over = rem < 0;
-    const proj = elapsed >= 0.4 && sp > 0 ? Math.round(sp / elapsed) : 0, fast = !over && proj > k.limit * 1.15;
-    return `<button class="ringcard ${over?"over":fast?"fast":""}" data-quick="${esc(k.id)}" aria-label="${esc(k.name)}: ${over ? money(-rem)+" over" : money(rem)+" left"} of ${money(k.limit)}${fast ? ". Spending fast, on pace for "+money(proj) : ""}. Add a transaction">
-      <div class="ring">${ringSvg(over ? 1 : sp/k.limit)}<div class="ctr"><b>${over ? "−"+whole(-rem) : whole(rem)}</b><small>${over ? "over" : "left"}</small></div><span class="rbadge emoji">${esc(k.emoji)}</span></div>
+    const L = lim(k), sp = r.spentBy[k.id]||0, rem = L - sp, over = rem < 0;
+    const proj = elapsed >= 0.4 && sp > 0 ? Math.round(sp / elapsed) : 0, fast = !over && proj > L * 1.15;
+    return `<button class="ringcard ${over?"over":fast?"fast":""}" data-quick="${esc(k.id)}" aria-label="${esc(k.name)}: ${over ? money(-rem)+" over" : money(rem)+" left"} of ${money(L)}${fast ? ". Spending fast, on pace for "+money(proj) : ""}. Add a transaction">
+      <div class="ring">${ringSvg(over ? 1 : sp/L)}<div class="ctr"><b>${over ? "−"+whole(-rem) : whole(rem)}</b><small>${over ? "over" : "left"}</small></div><span class="rbadge emoji">${esc(k.emoji)}</span></div>
       <div class="nm">${esc(k.name)}</div>
-      <div class="of">of ${whole(k.limit)}</div>${fast ? `<div class="pace">Pace ${whole(proj)}</div>` : ""}</button>`;
+      <div class="of">of ${whole(L)}</div>${fast ? `<div class="pace">Pace ${whole(proj)}</div>` : ""}</button>`;
   }).join("") + `</div>`;
   html += `</div><div class="hcol hright">` + bankNudge() + upNextHtml(c, mo) + deskAccountsHtml(c) + `</div>`;
   $("homeBody").innerHTML = html;
@@ -989,6 +990,44 @@ function upNextHtml(c, mo){
   return h;
 }
 /* Home hero's one-line pay-period view: Checking minus bills from Checking due before the next payday. */
+/* ---------------- per-paycheck allowance ----------------
+   Paid on the 15th and the last weekday (moved to Friday when they land on a weekend).
+   Period 1: the 1st up to the mid-month payday, funded by last month's end-of-month check.
+   Period 2: mid-month payday to month end, funded by the mid-month check; savings come out here.
+   Each period: paycheck - bills due in it (+ period 1 leftover, carried into period 2). Category budgets are half the monthly amount. */
+function calcP(){
+  const m = calc(), c = m.c;
+  if (!m.hasIncome) return Object.assign({}, m, {period:0, limitOf: k => k.limit});
+  const now = new Date(), t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()), y = t0.getFullYear(), mo = t0.getMonth();
+  const mid = payDate(y, mo, 15), end = payDate(y, mo, new Date(y, mo + 1, 0).getDate()), prevEnd = payDate(y, mo - 1, new Date(y, mo, 0).getDate());
+  const midT = mid.getTime(), first = new Date(y, mo, 1).getTime(), last = new Date(y, mo + 1, 0, 23, 59).getTime(), grace = 3 * DAY_MS;
+  const per = [{from:first, to:midT, payFrom:prevEnd.getTime() - grace, payTo:midT - grace}, {from:midT, to:last + 1, payFrom:midT - grace, payTo:end.getTime() - grace}];
+  const inP = (P, ts) => ts >= P.from && ts < P.to;
+  per.forEach((P, i) => {
+    const pay = (c.deposits||[]).filter(d => !d.kind && d.ts >= P.payFrom && d.ts < P.payTo).reduce((a, d) => a + (d.wages||0), 0);
+    P.actual = pay > 0; P.income = pay > 0 ? pay : Math.round(c.income / 2);
+    P.bills = insts(c).filter(b => i === 0 ? b.day < mid.getDate() : b.day >= mid.getDate()).reduce((a, b) => a + billAmt(b), 0);
+    P.extraIn = (c.deposits||[]).filter(d => d.kind === "other" && d.spend && inP(P, d.ts)).reduce((a, d) => a + d.wages, 0);
+    P.extra = (c.payments||[]).filter(x => x.budget !== false && inP(P, x.ts)).reduce((a, x) => a + x.amt, 0);
+    P.spentBy = {}; P.spent = 0;
+    state.cur.tx.forEach(t => { if (t.work || !inP(P, t.ts)) return; P.spentBy[t.cat] = (P.spentBy[t.cat]||0) + t.amt; P.spent += t.amt; });
+  });
+  const [A, B] = per;
+  A.available = A.income - A.bills + A.extraIn; A.left = A.available - A.spent - A.extra;
+  B.carry = A.left;
+  B.available = B.income - B.bills - c.savings + B.extraIn + B.carry; B.left = B.available - B.spent - B.extra;
+  const two = t0.getTime() >= midT, P = two ? B : A;
+  return Object.assign({}, m, {period: two ? 2 : 1, A, B, P, available:P.available, spent:P.spent, spentBy:P.spentBy, extra:P.extra, left:P.left,
+    start: new Date(P.from), endDate: new Date(Math.min(P.to - 1, last)), nextPay: two ? end : mid, carry: two ? B.carry : 0,
+    elapsed: Math.min(1, (t0.getTime() - P.from + DAY_MS) / (P.to - P.from)), limitOf: k => Math.round(k.limit / 2)});
+}
+function periodLine(r){
+  const f = d => d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
+  const bits = [`${f(r.start)} – ${f(r.endDate)}`, `next payday ${f(r.nextPay)}`];
+  if (r.carry) bits.push(`${r.carry < 0 ? "−" + whole(-r.carry) + " carried over" : whole(r.carry) + " carried over"}`);
+  const info = `This paycheck: ${money(r.P.income)}${r.P.actual ? "" : " (planned; the real one is used once you file it as Paycheck in Review)"}. Bills due this period: ${money(r.P.bills)}.${r.period === 2 && r.c.savings ? " Savings: " + money(r.c.savings) + "." : ""}${r.carry ? " Carried over from the first half: " + signed(r.carry) + "." : ""} Spent: ${money(r.P.spent + r.P.extra)}.`;
+  return bits.join(" • ") + ib(info);
+}
 function payLine(r){
   try{ const d = snapData(nextPayday()); if (d.spendable === null) throw 0; const pd = shortDate(d.until);
     return d.spendable < 0 ? `<b>${whole(-d.spendable)}</b> shortfall before payday (${pd})` : `<b>${whole(d.spendable)}</b> available until payday (${pd})`;
@@ -1120,12 +1159,12 @@ function renderAmount(){
   $("kindSeg").querySelectorAll("[data-kind]").forEach(b => b.setAttribute("aria-checked", b.dataset.kind === (state.selKind||"personal")));
 }
 function renderChips(){
-  const r = calc(), c = r.c;
+  const r = calcP(), c = r.c;
   if (!c.categories.find(k=>k.id===state.selCat)) state.selCat = c.categories[0] && c.categories[0].id;
   const ordered = r.tracked.concat(c.categories.filter(k=>!k.limit));
   const sl = $("chips").scrollLeft;
   $("chips").innerHTML = ordered.map(k => {
-    const rem = k.limit - (r.spentBy[k.id]||0);
+    const rem = r.limitOf(k) - (r.spentBy[k.id]||0);
     return `<button class="chip" role="radio" aria-checked="${k.id===state.selCat}" data-cat="${esc(k.id)}">
       <span class="bub emoji">${esc(k.emoji)}</span><span class="nm">${esc(k.name)}</span>
       <span class="rm ${rem<0?"over":""}">${k.limit ? (rem<0 ? whole(-rem)+" over" : whole(rem)+" left") : "&nbsp;"}</span></button>`;
@@ -1212,7 +1251,7 @@ $("addBtn").addEventListener("click", () => {
   if (month === NOW) store.addTx(t);
   else store.addOther(t);
   if (t.work){ toast(`${money(amt)} work expense${t.acct ? " on " + acctName(after, t.acct) : ""}. Horizon owes you ${money(ensureHz(after).balance)}. Budget untouched.`); return; }
-  const rem = k.limit - (calc().spentBy[k.id]||0);
+  const rp = calcP(), rem = rp.limitOf(k) - (rp.spentBy[k.id]||0);
   const ab = t.acct ? ` ${acctName(after, t.acct)}: ${money(balOf(after, t.acct))}.` : "";
   toast(`${money(amt)} added to ${k.name}.${ab}${k.limit && month===NOW ? (rem>=0 ? " "+whole(rem)+" left." : " "+whole(-rem)+" over.") : ""}`);
 });
@@ -2155,7 +2194,7 @@ function bankResolve(b, choice, quiet){
   if (t.month === NOW) store.addTx(t); else store.addOther(t);
   store.bankSet(b, {status:"done", cat: work ? "@work" : k.id, done:Date.now()});
   if (work) return toast(`${money(t.amt)} work expense. Horizon owes you ${money(ensureHz(after).balance)}. Budget untouched.`);
-  const rem = k.limit - (calc().spentBy[k.id]||0);
+  const rp = calcP(), rem = rp.limitOf(k) - (rp.spentBy[k.id]||0);
   toast(`${t.amt < 0 ? money(-t.amt) + " refund to" : money(t.amt) + " to"} ${k.name}.${k.limit && t.month === NOW ? (rem >= 0 ? " " + whole(rem) + " left." : " " + whole(-rem) + " over.") : ""}`);
 }
 /* Send a filed bank item back to Review, reversing whatever filing it did. */
