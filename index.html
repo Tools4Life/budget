@@ -371,6 +371,27 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 }
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 
+/* bank sync (SimpleFIN) */
+.navbtn .nbadge{margin-left:auto;min-width:22px;height:22px;border-radius:11px;background:var(--accent);color:#fff;font-size:.75rem;font-weight:800;display:grid;place-items:center;padding:0 6px}
+.nbadge[hidden]{display:none}
+.rv{border:1.5px solid var(--line);border-radius:20px;padding:12px 14px 10px;margin-top:10px;background:var(--bg)}
+.rv .top{display:flex;align-items:center;gap:12px}
+.rv .v.in{color:var(--good)}
+.rv .chips{padding:10px 14px 2px;margin:0 -14px}
+.rv .chip.sug .bub{background:var(--accent-soft);box-shadow:inset 0 0 0 2.5px var(--accent)}
+.rv .chip.sug .nm{color:var(--accent)}
+.rv .chip.act .bub{background:var(--surface2)}
+.rv .match{font-size:.82rem;color:var(--good);font-weight:600;margin-top:6px}
+.rv.busy{opacity:.45;pointer-events:none}
+.steps{margin:0;padding-left:1.2em;color:var(--ink)}
+.steps li{margin:6px 0}
+.steps a{color:var(--accent);font-weight:600}
+.lnkrow{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--line)}
+.lnkrow:first-child{border-top:0}
+.lnkrow .m,#bankBody .row .m{white-space:normal}
+.lnkrow select{flex:0 0 46%;min-width:0;border:1.5px solid var(--line);background:var(--bg);border-radius:12px;padding:9px 10px;font-size:.9rem}
+textarea.finput{min-height:92px;resize:vertical;font-family:ui-monospace,Menlo,monospace;font-size:.8rem;word-break:break-all}
+
 /* no double-tap zoom (pinch-to-zoom still works); no auto-zoom when tapping into a field on iPhone */
 html{touch-action:manipulation}
 @media (pointer:coarse){input,select,textarea{font-size:max(16px,1em)}}
@@ -399,6 +420,7 @@ html{touch-action:manipulation}
     <section class="view" id="v-planner"><div class="pagepad" id="plannerBody"></div></section>
     <section class="view" id="v-play"><div class="pagepad" id="playBody"></div></section>
     <section class="view" id="v-history"><div class="pagepad" id="historyBody"></div></section>
+    <section class="view" id="v-bank"><div class="pagepad" id="bankBody"></div></section>
     <section class="view" id="v-settings"><div class="pagepad" id="settingsBody"></div></section>
     <input type="file" id="restoreFile" accept="application/json,.json" hidden>
   </div>
@@ -556,7 +578,7 @@ const SEED_ACCTS = () => [
   ["amex","Amex Gold","💳","credit","#CA8504"],["affirm","Affirm","🛋️","loan","#0E9384"],["klarna","Klarna","🛋️","loan","#E8590C"],["horizon","Owed by Horizon","🧾","reimb","#12805C"]
 ].map(([id,name,emoji,type,color]) => ({id,name,emoji,type,color,balance:0,updated:0,apr:null,min:0,due:0}));
 function normalize(c){
-  if (!c){ const d = JSON.parse(JSON.stringify(DEFAULTS)); d.plan = Object.assign({strategy:"avalanche",total:0,custom:{}}, d.plan||{}); return d; }
+  if (!c){ const d = JSON.parse(JSON.stringify(DEFAULTS)); d.plan = Object.assign({strategy:"avalanche",total:0,custom:{}}, d.plan||{}); d.bank = normBank(); return d; }
   return {
     income: c.income||0, savings: c.savings||0,
     categories:(c.categories||[]).map(k=>({id:k.id,name:k.name,limit:k.limit||0,emoji:k.emoji||EMOJI_BY_ID[k.id]||"📦"})),
@@ -564,8 +586,15 @@ function normalize(c){
     accounts:(c.accounts||[]).map(a=>({id:a.id,name:a.name,emoji:a.emoji||"🏦",type:a.type||"checking",balance:a.balance||0,updated:a.updated||0,color:a.color||"",apr:typeof a.apr==="number"?a.apr:null,min:a.min||0,due:a.due||0})),
     plan:Object.assign({strategy:"avalanche",total:0,custom:{}}, c.plan||{}),
     deposits:(c.deposits||[]).slice(0,24),
-    payments:(c.payments||[]).slice(0,60)
+    payments:(c.payments||[]).slice(0,60),
+    bank: normBank(c.bank)
   };
+}
+/* Bank sync settings (shared across devices). The SimpleFIN key itself is NOT here; it lives only in one phone's localStorage.
+   links: SimpleFIN account id -> app account id ("" = ignore). names: last seen bank account info. rules: merchant -> category id, "@work" or "@skip". */
+function normBank(b){
+  b = b || {};
+  return {from: b.from || "", links: Object.assign({}, b.links), names: Object.assign({}, b.names), rules: Object.assign({}, b.rules), lastSync: b.lastSync || 0};
 }
 
 const NOW = monthKey(new Date());
@@ -574,7 +603,8 @@ const state = {
   cur:{tx:[],paid:{}},
   viewMonth:NOW, viewTx:[],
   digits:"", selCat:null, selAcct:"", dateStr:"",
-  pendingDel:null, billFilter:"all"
+  pendingDel:null, billFilter:"all",
+  bankNew:[], bankBusy:false, bankErr:[], bankLinking:false
 };
 const cfg = () => normalize(state.raw);
 
@@ -594,16 +624,20 @@ function unsub(name){ if (subs[name]){ subs[name](); delete subs[name]; } }
 function subscribeAll(){
   if (state.mode === "db"){
     unsub("cfg"); unsub("tx"); unsub("paid");
-    subs.cfg = db.doc("settings/main").onSnapshot(s => { state.raw = s.exists ? s.data() : null; renderAll(); }, ()=>{});
+    subs.cfg = db.doc("settings/main").onSnapshot(s => { state.raw = s.exists ? s.data() : null; renderAll(); if (!state.cfgSeen && !s.metadata.fromCache){ state.cfgSeen = true; setTimeout(bankAuto, 800); } }, ()=>{});
     subs.tx = db.collection("tx").where("month","==",NOW).onSnapshot(s => { state.cur.tx = s.docs.map(d=>Object.assign({id:d.id},d.data())); renderAll(); }, ()=>{});
     subs.paid = db.doc("paid/"+NOW).onSnapshot(s => { state.cur.paid = s.exists ? Object.assign({}, s.data()) : {}; state.paidLoaded = true; renderAll(); }, ()=>{});
+    unsub("bank");
+    subs.bank = db.collection("bank").where("status","==","new").onSnapshot(s => { state.bankNew = s.docs.map(d=>Object.assign({id:d.id},d.data())); renderAll(); }, ()=>{});
   } else {
     const o = lsRead();
+    state.bankNew = (o.bank||[]).filter(b=>b.status==="new");
     state.raw = o.config || null;
     state.cur.tx = (o.tx||[]).filter(t=>t.month===NOW);
     state.cur.paid = (o.paid||{})[NOW] || {};
     state.paidLoaded = true;
     renderAll();
+    if (!state.cfgSeen){ state.cfgSeen = true; setTimeout(bankAuto, 800); }
   }
   subscribeView();
 }
@@ -667,6 +701,27 @@ const store = {
     state.cur.paid = map; renderAll();
     if (state.mode === "db") return enqueue("paid", () => db.doc("paid/"+NOW).set(map)).catch(writeErr);
     const o = lsRead(); (o.paid = o.paid||{})[NOW] = map; lsWrite(o);
+  },
+  /* bank review queue: one doc per bank transaction, keyed by a hash of (bank account id, bank transaction id) so re-syncs never duplicate */
+  async bankIds(sinceTs){
+    if (state.mode === "db"){ const q = await db.collection("bank").where("ts",">=",sinceTs).get(); return new Set(q.docs.map(d=>d.id)); }
+    return new Set((lsRead().bank||[]).map(b=>b.id));
+  },
+  async bankAdd(list){
+    if (!list.length) return;
+    if (state.mode === "db"){ for (let i = 0; i < list.length; i += 25) await Promise.all(list.slice(i,i+25).map(b => { const {id, ...body} = b; return db.collection("bank").doc(id).set(body); })); return; }
+    const o = lsRead(); o.bank = (o.bank||[]).concat(list); lsWrite(o); state.bankNew = o.bank.filter(b=>b.status==="new"); renderAll();
+  },
+  bankSet(b, patch){
+    const nb = Object.assign({}, b, patch);
+    state.bankNew = state.bankNew.filter(x=>x.id!==b.id).concat(nb.status === "new" ? [nb] : []);
+    renderAll();
+    if (state.mode === "db"){ const {id, ...body} = nb; return db.collection("bank").doc(id).set(body).catch(writeErr); }
+    const o = lsRead(); o.bank = (o.bank||[]).filter(x=>x.id!==b.id).concat([nb]); lsWrite(o);
+  },
+  async bankGet(id){
+    if (state.mode === "db"){ const s = await db.doc("bank/"+id).get(); return s.exists ? Object.assign({id}, s.data()) : null; }
+    return (lsRead().bank||[]).find(b=>b.id===id) || null;
   }
 };
 function editCfg(mut){ const c = cfg(); mut(c); store.saveCfg(c); }
@@ -675,7 +730,8 @@ function editCfg(mut){ const c = cfg(); mut(c); store.saveCfg(c); }
 // amt > 0 means money going out: cash balances drop, card/loan balances (what you owe) rise.
 function moveBal(c, id, amt){ const a = c.accounts.find(x=>x.id===id); if (!a || !amt) return; a.balance += DEBT.has(a.type) ? amt : (a.type === "reimb" ? 0 : -amt); a.updated = Date.now(); }
 function ensureHz(c){ let a = c.accounts.find(x=>x.type==="reimb"); if (!a){ a = {id:"horizon",name:"Owed by Horizon",emoji:"🧾",type:"reimb",color:"#12805C",balance:0,updated:0,apr:null,min:0,due:0}; c.accounts.push(a); } return a; }
-function applyTx(c, t, sign){ if (t.acct) moveBal(c, t.acct, sign*t.amt); if (t.work){ const h = ensureHz(c); h.balance += sign*t.amt; h.updated = Date.now(); } }
+// Bank-imported transactions (t.bank) never move balances: linked accounts take the bank's balance on every sync.
+function applyTx(c, t, sign){ if (t.acct && !t.bank) moveBal(c, t.acct, sign*t.amt);if (t.work){ const h = ensureHz(c); h.balance += sign*t.amt; h.updated = Date.now(); } }
 const defaultPayFrom = c => (c.accounts.find(a=>a.type==="checking") || {}).id || "";
 const acctName = (c, id) => (c.accounts.find(a=>a.id===id) || {}).name || "";
 const balOf = (c, id) => (c.accounts.find(a=>a.id===id) || {}).balance || 0;
@@ -702,8 +758,9 @@ function calc(){
 
 /* ---------------- nav ---------------- */
 const ICON = {"history": "<path d=\"M3 12a9 9 0 1 0 3-6.7\"/><path d=\"M3 4v4h4\"/><path d=\"M12 7v5l3 2\"/>", "settings": "<circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z\"/>", "play": "<path d=\"M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0\"/><circle cx=\"16\" cy=\"6\" r=\"2\"/><circle cx=\"10\" cy=\"12\" r=\"2\"/><circle cx=\"18\" cy=\"18\" r=\"2\"/>", "home": "<path d=\"M3 11l9-7 9 7\"/><path d=\"M5 10v10h14V10\"/>", "activity": "<path d=\"M8 6h13M8 12h13M8 18h13\"/><circle cx=\"3.5\" cy=\"6\" r=\"1\"/><circle cx=\"3.5\" cy=\"12\" r=\"1\"/><circle cx=\"3.5\" cy=\"18\" r=\"1\"/>", "accounts": "<path d=\"M3 10l9-6 9 6\"/><path d=\"M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18\"/>", "bills": "<rect x=\"3\" y=\"5\" width=\"18\" height=\"16\" rx=\"3\"/><path d=\"M3 10h18M8 3v4M16 3v4\"/>", "planner": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><circle cx=\"12\" cy=\"12\" r=\"5\"/><circle cx=\"12\" cy=\"12\" r=\"1.2\"/>"};
-const NAV = [["home","","Home"],["activity","","Activity"],["accounts","","Accounts"],["bills","","Bills"],["planner","","Planner"],["play","","Playground"],["history","","History"],["settings","","Settings"]];
-$("navlist").innerHTML = NAV.map(([id,e,n]) => `<button class="navbtn" data-go="${id}"><svg class="nicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[id]}</svg>${n}</button>`).join("");
+ICON.bank = "<path d=\"M21 12a9 9 0 0 1-15.5 6.2\"/><path d=\"M3 12a9 9 0 0 1 15.5-6.2\"/><path d=\"M18.5 2.5v3.7h-3.7\"/><path d=\"M5.5 21.5v-3.7h3.7\"/>";
+const NAV = [["home","","Home"],["activity","","Activity"],["bank","","Bank sync"],["accounts","","Accounts"],["bills","","Bills"],["planner","","Planner"],["play","","Playground"],["history","","History"],["settings","","Settings"]];
+$("navlist").innerHTML = NAV.map(([id,e,n]) => `<button class="navbtn" data-go="${id}"><svg class="nicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[id]}</svg>${n}${id === "bank" ? '<span class="nbadge" id="bankBadge" hidden></span>' : ""}</button>`).join("");
 function go(view){
   if (!NAV.find(n=>n[0]===view)) view = "home";
   state.view = view;
@@ -774,7 +831,7 @@ function renderHome(){
       <div class="nm">${esc(k.name)}</div>
       <div class="of">of ${whole(k.limit)}</div>${fast ? `<div class="pace">Pace ${whole(proj)}</div>` : ""}</button>`;
   }).join("") + `</div>`;
-  html += `</div><div class="hcol hright">` + upNextHtml(c, mo) + deskAccountsHtml(c) + `</div>`;
+  html += `</div><div class="hcol hright">` + bankNudge() + upNextHtml(c, mo) + deskAccountsHtml(c) + `</div>`;
   $("homeBody").innerHTML = html;
   fitHome();
 }
@@ -1104,7 +1161,7 @@ function renderActivity(){
       const k = cats[t.cat]; const a = accts[t.acct];
       const name = k ? k.name : (t.catName || "Removed category");
       html += `<${state.readOnly?"div":"button"} class="row ${state.readOnly?"":"rowbtn"}" ${state.readOnly?"":`data-edit="${esc(t.id)}" aria-label="Edit ${esc(t.note||name)}, ${money(t.amt)}"`}><span class="ebub emoji">${esc(k ? k.emoji : "📦")}</span>
-        <div class="grow"><div class="t">${esc(t.note || name)}${t.work ? '<span class="tag">Work</span>' : ""}</div><div class="m">${t.note ? esc(name)+" • " : ""}${d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}${a ? ` • <span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""}</div></div>
+        <div class="grow"><div class="t">${esc(t.note || name)}${t.work ? '<span class="tag">Work</span>' : ""}${t.bank ? '<span class="tag btag">Bank</span>' : ""}</div><div class="m">${t.note ? esc(name)+" • " : ""}${d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}${a ? ` • <span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""}</div></div>
         <span class="v">${money(t.amt)}</span>
       </${state.readOnly?"div":"button"}>`;
     });
@@ -1117,7 +1174,7 @@ function renderActivity(){
 $("activityBody").addEventListener("click", async e => {
   const m = e.target.closest("[data-m]"), ed = e.target.closest("[data-edit]");
   if (m){ const nk = shiftKey(state.viewMonth, +m.dataset.m); if (nk > NOW) return; state.viewMonth = nk; subscribeView(); renderActivity(); return; }
-  if (ed){ const list = state.viewMonth === NOW ? state.cur.tx : (state.viewTx||[]); const t = list.find(x=>x.id===ed.dataset.edit); if (t) openAdd(null, t); return; }
+  if (ed){ const list = state.viewMonth === NOW ? state.cur.tx : (state.viewTx||[]); const t = list.find(x=>x.id===ed.dataset.edit); if (t) (t.bank ? bankTxForm(t) : openAdd(null, t)); return; }
   const xp = e.target.closest("[data-xpay]"); if (xp) return xpayView(xp.dataset.xpay);
   const dp = e.target.closest("[data-dep]"); if (dp) return depForm(dp.dataset.dep);
   if (e.target.id === "exportCsv") exportCsv();
@@ -1737,6 +1794,303 @@ $("restoreFile").addEventListener("change", async e => {
   }catch(err){ toast("That file isn't a budget backup."); }
 });
 
+/* ---------------- bank sync (SimpleFIN Bridge) ----------------
+   The SimpleFIN access URL is a permanent, read-only key to every connected bank account. It lives ONLY in this
+   browser's localStorage: never in Firebase, never in a backup file. Imported transactions go to Firebase
+   (users/{uid}/apps/budget/bank) so every signed-in device can review them.
+   Spec: https://www.simplefin.org/protocol.html. Bridge asks for 24 requests a day or fewer and returns at most 90 days per request. */
+const SF_KEY = "budget-simplefin", SF_LOG = "budget-simplefin-log", SF_DAILY = 20, SF_EVERY = 4*3600000, DAY_MS = 86400000;
+const SF_SIGNUP = "https://bridge.simplefin.org/", SF_CREATE = "https://bridge.simplefin.org/simplefin/create";
+const sfKey = () => { try{ const o = JSON.parse(localStorage.getItem(SF_KEY)); return o && o.url ? o : null; }catch(e){ return null; } };
+const sfSave = o => { try{ if (o) localStorage.setItem(SF_KEY, JSON.stringify(o)); else localStorage.removeItem(SF_KEY); }catch(e){} };
+const sfLog = () => { try{ return (JSON.parse(localStorage.getItem(SF_LOG))||[]).filter(t => t > Date.now() - DAY_MS); }catch(e){ return []; } };
+const sfLogAdd = () => { const l = sfLog(); l.push(Date.now()); try{ localStorage.setItem(SF_LOG, JSON.stringify(l)); }catch(e){} };
+const sfErr = msg => Object.assign(new Error(msg), {sf:true});
+const localMidnight = ymd => { const [y,m,d] = String(ymd).split("-").map(Number); return new Date(y, (m||1)-1, d||1).getTime(); };
+/* Stable doc id per bank transaction, so syncing the same window twice never creates duplicates. */
+function bankId(acctId, txId){
+  const s = acctId + "|" + txId; let h1 = 0x811c9dc5, h2 = 0x9747b28c;
+  for (let i = 0; i < s.length; i++){ const ch = s.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 16777619); h2 = Math.imul(h2 ^ ch, 0x5bd1e995); h2 ^= h2 >>> 13; }
+  return "b" + (h1>>>0).toString(36) + (h2>>>0).toString(36);
+}
+/* "KROGER #123 SPARTANBURG SC" and "Kroger 456" both become "kroger spartanburg"/"kroger": first two words, no numbers or bank noise. */
+const merchKey = d => String(d||"").toLowerCase().replace(/[^a-z& ]+/g," ").replace(/\b(pos|purchase|debit|credit|card|recurring|payment|checkcard|ach|sq|tst|pp|www|com|the)\b/g," ").trim().split(/\s+/).filter(Boolean).slice(0,2).join(" ");
+const niceDesc = d => String(d||"").replace(/\s{2,}/g," ").trim().slice(0,60);
+
+async function sfClaim(token){
+  let claim = "";
+  try{ claim = atob(String(token).replace(/\s+/g,"")); }catch(e){}
+  if (!/^https:\/\/\S+$/.test(claim)) throw sfErr("That isn't a SimpleFIN setup token. Copy the whole token from the Bridge and paste it here.");
+  let r;
+  try{ r = await fetch(claim, {method:"POST"}); }catch(e){ throw sfErr("Couldn't reach SimpleFIN. Check your connection and try again."); }
+  if (r.status === 403) throw sfErr("SimpleFIN says that token was already used or doesn't exist. If you didn't use it yourself, turn it off on the SimpleFIN Bridge, then make a new one.");
+  if (!r.ok) throw sfErr("SimpleFIN returned an error (" + r.status + "). Try again in a minute.");
+  const url = (await r.text()).trim();
+  let u = null; try{ u = new URL(url); }catch(e){}
+  if (!u || u.protocol !== "https:" || !u.username || !u.password) throw sfErr("SimpleFIN sent back something unexpected. Make a new token and try again.");
+  return url;
+}
+async function sfAccounts(params){
+  const k = sfKey(); if (!k) throw sfErr("This device isn't connected to SimpleFIN.");
+  const u = new URL(k.url);
+  // fetch() refuses URLs with user:pass in them, so the credentials go in an Authorization header instead.
+  const auth = "Basic " + btoa(decodeURIComponent(u.username) + ":" + decodeURIComponent(u.password));
+  const base = u.origin + u.pathname.replace(/\/$/,"");
+  const qs = new URLSearchParams(Object.assign({version:"2"}, params||{}));
+  sfLogAdd();
+  let r;
+  try{ r = await fetch(base + "/accounts?" + qs, {headers:{Authorization:auth}, cache:"no-store"}); }
+  catch(e){ throw sfErr("Couldn't reach SimpleFIN. Check your connection and try again."); }
+  if (r.status === 402) throw sfErr("SimpleFIN says your Bridge subscription needs payment.");
+  if (r.status === 403) throw sfErr("SimpleFIN turned down this device's key. It may have been turned off on the Bridge. Disconnect below, then connect again with a new token.");
+  if (!r.ok) throw sfErr("SimpleFIN returned an error (" + r.status + "). Try again later.");
+  const d = await r.json();
+  const conns = Object.fromEntries((d.connections||[]).map(x => [x.conn_id, x]));
+  const accounts = (d.accounts||[]).map(a => {
+    const cn = conns[a.conn_id] || {}, og = a.org || {};
+    return {id:String(a.id), name:String(a.name||"Account"), org:String(cn.name || cn.org_name || og.name || og.domain || ""),
+      bal:Math.round(parseFloat(a.balance)*100) || 0, at:(+a["balance-date"]||0)*1000, tx:Array.isArray(a.transactions) ? a.transactions : []};
+  });
+  const errors = (Array.isArray(d.errlist) && d.errlist.length ? d.errlist.map(e => e.msg || e.code) : (d.errors||[])).map(String);
+  return {accounts, errors};
+}
+const bankName = (id, n) => ({name:n.name, org:n.org, bal:n.bal, at:n.at});
+
+async function bankConnect(token){
+  if (state.bankBusy || state.readOnly) return;
+  state.bankBusy = true; renderBank();
+  try{
+    const url = await sfClaim(token);
+    sfSave({url, at:Date.now()});
+    const {accounts, errors} = await sfAccounts({"balances-only":"1"});
+    editCfg(c => { accounts.forEach(a => { c.bank.names[a.id] = bankName(a.id, a); }); if (!c.bank.from) c.bank.from = todayStr(); });
+    state.bankErr = errors; state.bankLinking = true;
+    toast(accounts.length ? `Connected. Found ${accounts.length} account${accounts.length===1?"":"s"}. Match each one below.` : "Connected, but no accounts yet. Add banks on the SimpleFIN Bridge, then tap Refresh account list.");
+  }catch(e){
+    state.bankErr = [e.sf ? e.message : "Couldn't connect: " + (e.message || e)];
+    toast(state.bankErr[0]);
+  }finally{ state.bankBusy = false; renderAll(); }
+}
+async function bankSync(manual){
+  if (state.bankBusy || state.readOnly || state.mode === "loading") return;
+  if (!sfKey()){ if (manual) toast("Connect this device first."); return; }
+  const bk = cfg().bank;
+  if (!Object.values(bk.links).some(Boolean)){ if (manual) toast("Match at least one bank account first."); return; }
+  if (sfLog().length >= SF_DAILY){ if (manual) toast(`Already synced ${SF_DAILY} times today. SimpleFIN allows about 24 a day; try again later.`); return; }
+  state.bankBusy = true; renderAll();
+  try{
+    const fromTs = bk.from ? localMidnight(bk.from) : localMidnight(todayStr());
+    // Re-ask for the last week every time: banks post late, and the stable ids drop anything already imported.
+    let start = bk.lastSync ? Math.max(fromTs, bk.lastSync - 7*DAY_MS) : fromTs;
+    start = Math.max(start, Date.now() - 89*DAY_MS);
+    const {accounts, errors} = await sfAccounts({"start-date": String(Math.floor(start/1000))});
+    const have = await store.bankIds(start - 14*DAY_MS);
+    const links = cfg().bank.links, fresh = [];
+    accounts.forEach(a => {
+      const to = links[a.id]; if (!to) return;
+      a.tx.forEach(t => {
+        if (t.pending || !+t.posted) return;  // pending items get a new id once they post, so wait for the posted version
+        const ts = (+t.transacted_at || +t.posted) * 1000;
+        if (ts < fromTs) return;
+        const amt = -Math.round(parseFloat(t.amount)*100);  // SimpleFIN: negative = money out. App: positive = money out.
+        if (!amt) return;
+        const id = bankId(a.id, t.id); if (have.has(id)) return; have.add(id);
+        fresh.push({id, status:"new", bacct:a.id, acct:to, ts, amt, desc:String(t.description || t.payee || "Bank transaction").slice(0,90), month:monthKey(new Date(ts)), added:Date.now()});
+      });
+    });
+    await store.bankAdd(fresh);
+    editCfg(c => {
+      accounts.forEach(a => {
+        c.bank.names[a.id] = bankName(a.id, a);
+        const ac = c.accounts.find(x => x.id === c.bank.links[a.id]);
+        // Cards and loans: the app tracks what you owe as a positive number; banks report it either sign.
+        if (ac && ac.type !== "reimb"){ ac.balance = DEBT.has(ac.type) ? Math.abs(a.bal) : a.bal; ac.updated = a.at || Date.now(); }
+      });
+      c.bank.lastSync = Date.now();
+    });
+    state.bankErr = errors;
+    if (manual || fresh.length) toast(fresh.length ? `${fresh.length} new bank transaction${fresh.length===1?"":"s"} to review. Balances updated.` : "Up to date. Balances updated.");
+  }catch(e){
+    state.bankErr = [e.sf ? e.message : "Sync failed: " + (e.message || e)];
+    if (manual) toast(state.bankErr[0]);
+  }finally{ state.bankBusy = false; renderAll(); }
+}
+/* Runs on open and when the app comes back to the foreground, at most every 4 hours, only on the connected device. */
+function bankAuto(){
+  if (!sfKey() || state.mode === "loading" || !state.cfgSeen) return;
+  const l = sfLog(); if (l.length && Date.now() - l[l.length-1] < SF_EVERY) return;
+  bankSync(false);
+}
+
+/* A hand-entered purchase that looks like this bank item: same amount, same card (or none), within 4 days. */
+function bankMatch(b, used){
+  if (b.amt <= 0) return null;
+  const pool = state.cur.tx.concat(state.viewTx || []);
+  return pool.find(t => !t.bank && !used.has(t.id) && t.amt === b.amt && (!t.acct || t.acct === b.acct) && Math.abs(t.ts - b.ts) <= 4*DAY_MS) || null;
+}
+function bankChoices(c, b, m){
+  const rule = c.bank.rules[merchKey(b.desc)] || "";
+  const cats = c.categories.filter(k=>k.limit>0).concat(c.categories.filter(k=>!k.limit)).map(k => ({v:"c:"+k.id, e:k.emoji, n:k.name}));
+  const work = {v:"work", e:"🧾", n:"Work", act:true}, skip = {v:"skip", e:"↔️", n:b.amt < 0 ? "Money in" : "Transfer", act:true};
+  let list = b.amt < 0 ? [skip].concat(cats) : cats.concat([work, skip]);
+  // No rule yet: card payments and transfers look alike at every bank, so put Transfer first for them.
+  const looksMove = /\b(payment|pmt|autopay|auto pay|epay|e-payment|transfer|xfer|thank you|zelle to|to savings|from savings)\b/i.test(b.desc);
+  const want = rule === "@work" ? "work" : rule === "@skip" ? "skip" : rule ? "c:"+rule : looksMove ? "skip" : "";
+  const i = list.findIndex(x => x.v === want);
+  if (i > 0) list = [list[i]].concat(list.slice(0,i), list.slice(i+1));
+  if (i >= 0) list[0] = Object.assign({}, list[0], {sug:true});
+  if (m) list = [{v:"dup:"+m.id, e:"✅", n:"Logged it", sug:true}].concat(list.map(x => Object.assign({}, x, {sug:false})));
+  return list;
+}
+function bankResolve(b, choice){
+  if (state.readOnly) return toast("View only.");
+  const c = cfg(), key = merchKey(b.desc);
+  if (choice.startsWith("dup:")){ store.bankSet(b, {status:"dup", match:choice.slice(4), done:Date.now()}); toast("Got it. You already logged that one."); return; }
+  if (choice === "skip"){
+    editCfg(x => { if (key) x.bank.rules[key] = "@skip"; });
+    store.bankSet(b, {status:"skipped", done:Date.now()});
+    toast(b.amt < 0 ? "Left out of the budget. Balances still come from the bank." : "Skipped. Transfers and card payments don't count as spending.");
+    return;
+  }
+  const work = choice === "work";
+  const k = work ? (c.categories.find(x=>x.id==="other") || c.categories[0]) : c.categories.find(x => "c:"+x.id === choice);
+  if (!k) return;
+  const t = {id:b.id, amt:b.amt, cat:k.id, catName:k.name, note:niceDesc(b.desc), acct:c.accounts.find(a=>a.id===b.acct) ? b.acct : "", ts:b.ts, month:monthKey(new Date(b.ts)), work, bank:b.id};
+  let after = null;
+  editCfg(x => { if (work) applyTx(x, t, 1); if (key) x.bank.rules[key] = work ? "@work" : k.id; after = x; });
+  if (t.month === NOW) store.addTx(t); else store.addOther(t);
+  store.bankSet(b, {status:"done", done:Date.now()});
+  if (work) return toast(`${money(t.amt)} work expense. Horizon owes you ${money(ensureHz(after).balance)}. Budget untouched.`);
+  const rem = k.limit - (calc().spentBy[k.id]||0);
+  toast(`${t.amt < 0 ? money(-t.amt) + " refund to" : money(t.amt) + " to"} ${k.name}.${k.limit && t.month === NOW ? (rem >= 0 ? " " + whole(rem) + " left." : " " + whole(-rem) + " over.") : ""}`);
+}
+/* Edit an imported transaction from Activity: category and work/personal only. Amount and date belong to the bank. */
+function bankTxForm(t){
+  if (state.readOnly) return toast("View only.");
+  const c = cfg(), a = c.accounts.find(x=>x.id===t.acct);
+  openForm({
+    title: t.note || "Bank transaction",
+    fields:[
+      {k:"cat", type:"catpick", label:"Category", options:c.categories.map(k=>[k.id,k.emoji,k.name]), value:t.cat},
+      {k:"kind", type:"seg", label:"Who pays", options:[["personal","Personal"],["work","Work (reimbursed)"]], value:t.work ? "work" : "personal"}],
+    extra:`<div class="fhelp">${t.amt < 0 ? "+" + money(-t.amt) : money(t.amt)} on ${esc(new Date(t.ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}${a ? " • " + esc(a.name) : ""}. Imported from your bank, so the amount and date stay as the bank has them.</div>`,
+    saveLabel:"Save",
+    onSave: v => {
+      const k = c.categories.find(x=>x.id===v.cat); if (!k) return "Pick a category.";
+      const nt = Object.assign({}, t, {cat:k.id, catName:k.name, work:v.kind === "work"}), key = merchKey(t.note);
+      editCfg(x => { applyTx(x, t, -1); applyTx(x, nt, 1); if (key) x.bank.rules[key] = nt.work ? "@work" : k.id; });
+      store.updTx(nt); toast("Updated.");
+    },
+    deleteLabel:"Send back to review",
+    onDelete: async () => {
+      editCfg(x => applyTx(x, t, -1)); store.delTx(t.id);
+      const b = await store.bankGet(t.bank);
+      if (b) store.bankSet(b, {status:"new"});
+      toast("Moved back to Bank sync for review.");
+    }
+  });
+}
+function bankNudge(){
+  const n = state.bankNew.length;
+  return n ? `<button class="nudge" data-goto="bank"><span class="emoji">🏦</span><span>${n} bank transaction${n===1?"":"s"} to review</span><b>Review</b></button>` : "";
+}
+function renderBank(){
+  const c = cfg(), bk = c.bank, key = sfKey(), names = Object.entries(bk.names), anyLink = Object.values(bk.links).some(Boolean);
+  const accts = Object.fromEntries(c.accounts.map(a=>[a.id,a]));
+  let h = "";
+  if (state.bankErr.length) h += `<div class="warnbox" style="margin-top:0">${state.bankErr.map(esc).join("<br>")}</div>`;
+  if (anyLink || state.bankNew.length){
+    const items = state.bankNew.slice().sort((a,b)=>b.ts-a.ts), used = new Set();
+    h += `<h2 style="margin-top:4px">To review <small>${items.length ? items.length + " left" : ""}</small></h2>`;
+    if (!items.length) h += `<div class="list"><div class="empty">All caught up. New bank transactions show up here after each sync.</div></div>`;
+    items.forEach(b => {
+      const m = bankMatch(b, used); if (m) used.add(m.id);
+      const a = accts[b.acct], mk = m && c.categories.find(k=>k.id===m.cat);
+      h += `<div class="rv" data-rv="${esc(b.id)}"><div class="top"><span class="ebub emoji">${b.amt < 0 ? "💰" : "🏦"}</span>
+        <div class="grow"><div class="t">${esc(niceDesc(b.desc))}</div><div class="m">${esc(new Date(b.ts).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}))}${a ? ` • <span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""}</div></div>
+        <span class="v ${b.amt < 0 ? "in" : ""}">${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</span></div>
+        ${m ? `<div class="match">Looks like your ${esc(m.note || (mk ? mk.name : "entry"))} entry from ${esc(new Date(m.ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}.</div>` : ""}
+        <div class="chips">${bankChoices(c, b, m).map(ch => `<button class="chip${ch.sug ? " sug" : ""}${ch.act ? " act" : ""}" data-pick="${esc(ch.v)}" ${state.readOnly ? "disabled" : ""}><span class="bub emoji">${esc(ch.e)}</span><span class="nm">${esc(ch.n)}</span></button>`).join("")}</div></div>`;
+    });
+    if (items.length) h += `<p class="hint">One tap files it. Paying a card from checking shows up twice, once on each account: tap Transfer on both. Horizon purchases: tap Work. Highlighted picks come from what you chose last time.</p>`;
+  }
+  h += `<h2>${key ? "This device" : "Connect your banks"}</h2>`;
+  if (!key){
+    if (anyLink) h += `<p class="settext">Bank sync is set up on another device, which pulls in new transactions. You can review them here. To sync from this device instead, connect it with its own setup token.</p>`;
+    h += `<div class="card"><ol class="steps">
+      <li>Open the <a href="${SF_SIGNUP}" target="_blank" rel="noopener">SimpleFIN Bridge</a>, sign up ($15 a year), and connect your banks there.</li>
+      <li>On the Bridge, <a href="${SF_CREATE}" target="_blank" rel="noopener">create a setup token</a> and copy it.</li>
+      <li>Paste it here. Each token works once.</li></ol>
+      <textarea class="finput" id="sfToken" placeholder="Paste setup token" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-top:10px"></textarea>
+      <button class="primary" id="sfConnect" ${state.bankBusy || state.readOnly ? "disabled" : ""}>${state.bankBusy ? "Connecting…" : "Connect this device"}</button>
+      <p class="fhelp">The key SimpleFIN sends back stays on this device only. It isn't saved to your account or your backups, and it can only read balances and transactions. It can't move money.</p></div>`;
+  } else {
+    h += `<div class="card"><div class="sum"><span>Last sync</span><b>${bk.lastSync ? esc(new Date(bk.lastSync).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})) : "Not yet"}</b></div>
+      <div class="sum"><span>Importing from</span><b>${bk.from ? esc(shortDate(bk.from)) : "Not set"}</b></div>
+      <div class="sum"><span>Syncs in the last 24 hours</span><b>${sfLog().length} of ${SF_DAILY}</b></div>
+      <button class="primary" id="sfSync" ${state.bankBusy || !anyLink || state.readOnly ? "disabled" : ""}>${state.bankBusy ? "Syncing…" : "Sync now"}</button>
+      <p class="fhelp">Syncs by itself when you open the app, at most every 4 hours. Banks update SimpleFIN about once a day, so new purchases can take a day to show up. Linked accounts take the bank's balance on every sync.</p></div>`;
+  }
+  if (names.length){
+    const linking = state.bankLinking || !anyLink, opts = c.accounts.filter(a=>a.type!=="reimb");
+    h += `<h2>Bank accounts ${linking || state.readOnly ? "" : `<button class="sharebtn" id="sfEditLinks">Change</button>`}</h2>`;
+    if (linking){
+      h += `<p class="settext">Match each bank account to the account it is in this app. "Don't use" skips it.</p><div class="list">` + names.map(([id,n]) => `<div class="lnkrow"><div class="grow"><div class="t">${esc(n.name)}</div><div class="m">${esc(n.org)}${n.org ? " • " : ""}${money(n.bal)}</div></div>
+        <select data-link="${esc(id)}" aria-label="Use ${esc(n.name)} as"><option value="">Don't use</option>${opts.map(a => `<option value="${esc(a.id)}" ${bk.links[id] === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></div>`).join("") + `</div>`;
+      if (!opts.length) h += `<p class="hint">You don't have any accounts in the app yet. Set them up on Accounts first.</p>`;
+      h += `<label class="flabel" for="sfFrom">Bring in transactions from</label><input class="finput" type="date" id="sfFrom" value="${esc(bk.from || todayStr())}" max="${todayStr()}" min="${dateStr(Date.now() - 89*DAY_MS)}">
+        <div class="fhelp">Anything before this date stays out, so purchases you already entered by hand don't come in twice. Up to 89 days back.</div>
+        <div class="btnrow">${anyLink ? `<button class="small-ghost" id="sfCancelLinks">Cancel</button>` : ""}<button class="small-primary" id="sfSaveLinks" ${state.readOnly ? "disabled" : ""}>Save${key ? " and sync" : ""}</button></div>`;
+    } else {
+      h += `<div class="list">` + names.map(([id,n]) => { const a = accts[bk.links[id]]; return `<div class="row"><div class="grow"><div class="t">${esc(n.name)}</div><div class="m">${esc(n.org)}${n.org ? " • " : ""}${a ? "→ " + esc(a.name) : "Not used"}</div></div><span class="v">${money(n.bal)}</span></div>`; }).join("") + `</div>`;
+    }
+  }
+  if (key) h += `<div class="list" style="margin-top:22px">
+      <button class="row" id="sfRefresh" ${state.bankBusy ? "disabled" : ""}><div class="grow"><div class="t">Refresh account list</div><div class="m">After adding a bank on the SimpleFIN Bridge.</div></div></button>
+      <button class="row" id="sfDisconnect"><div class="grow"><div class="t" style="color:var(--warn)">${state.sfConfirm ? "Tap again to disconnect" : "Disconnect this device"}</div><div class="m">Deletes the key from this device. Imported transactions stay. To shut off access everywhere, also delete this app's access on the SimpleFIN Bridge.</div></div></button></div>`;
+  h += `<div style="height:28px"></div>`;
+  $("bankBody").innerHTML = h;
+}
+$("bankBody").addEventListener("click", async e => {
+  const pk = e.target.closest("[data-pick]");
+  if (pk){ const card = pk.closest("[data-rv]"), b = state.bankNew.find(x=>x.id===card.dataset.rv); if (b){ card.classList.add("busy"); bankResolve(b, pk.dataset.pick); } return; }
+  const id = (e.target.closest("button")||{}).id;
+  if (id !== "sfDisconnect" && state.sfConfirm){ state.sfConfirm = false; }
+  if (id === "sfConnect"){ const v = $("sfToken").value.trim(); if (!v) return toast("Paste the setup token first."); return bankConnect(v); }
+  if (id === "sfSync") return bankSync(true);
+  if (id === "sfEditLinks"){ state.bankLinking = true; return renderBank(); }
+  if (id === "sfCancelLinks"){ state.bankLinking = false; return renderBank(); }
+  if (id === "sfSaveLinks"){
+    const links = {}; $("bankBody").querySelectorAll("[data-link]").forEach(s => { links[s.dataset.link] = s.value; });
+    const from = $("sfFrom").value || todayStr();
+    if (localMidnight(from) < localMidnight(dateStr(Date.now() - 89*DAY_MS))) return toast("SimpleFIN only goes back about 90 days. Pick a later date.");
+    if (!Object.values(links).some(Boolean)) return toast("Match at least one bank account, or set them all to Don't use and disconnect.");
+    editCfg(c => {
+      const changed = from !== c.bank.from || Object.entries(links).some(([k,v]) => v && c.bank.links[k] !== v);
+      c.bank.links = links; c.bank.from = from;
+      if (changed) c.bank.lastSync = 0;  // pull the whole window again; ids already imported are skipped
+    });
+    state.bankLinking = false; renderBank();
+    if (sfKey()) return bankSync(true);
+    return toast("Saved.");
+  }
+  if (id === "sfRefresh"){
+    if (state.bankBusy) return;
+    if (sfLog().length >= SF_DAILY) return toast("Synced a lot today already. Try again later.");
+    state.bankBusy = true; renderBank();
+    try{ const {accounts, errors} = await sfAccounts({"balances-only":"1"}); editCfg(c => accounts.forEach(a => { c.bank.names[a.id] = bankName(a.id, a); })); state.bankErr = errors;
+      const nw = accounts.filter(a => !(a.id in cfg().bank.links)).length; if (nw) state.bankLinking = true;
+      toast(nw ? `${nw} new account${nw===1?"":"s"} found. Match ${nw===1?"it":"them"} below.` : "Account list is up to date."); }
+    catch(err){ state.bankErr = [err.sf ? err.message : "Refresh failed."]; toast(state.bankErr[0]); }
+    finally{ state.bankBusy = false; renderAll(); }
+    return;
+  }
+  if (id === "sfDisconnect"){
+    if (!state.sfConfirm){ state.sfConfirm = true; return renderBank(); }
+    state.sfConfirm = false; sfSave(null); state.bankErr = []; renderBank(); toast("Disconnected. The key is gone from this device.");
+  }
+});
+
 /* ---------------- generic form sheet ---------------- */
 let formSpec = null;
 function openForm(spec){
@@ -1812,9 +2166,11 @@ function renderAll(){
   if (state.view === "play") renderPlay();
   if (state.view === "history") renderHistory();
   if (state.view === "settings") renderSettings();
+  if (state.view === "bank") renderBank();
+  const bb = $("bankBadge"); if (bb){ bb.hidden = !state.bankNew.length; bb.textContent = state.bankNew.length; }
   clearTimeout(snapT); snapT = setTimeout(syncSnap, 1500);
 }
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && monthKey(new Date()) !== NOW) location.reload(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState !== "visible") return; if (monthKey(new Date()) !== NOW) return location.reload(); bankAuto(); });
 
 /* ---------------- boot ---------------- */
 go((location.hash || "#home").slice(1));
@@ -1855,7 +2211,7 @@ else{
     const C=p=>{const r=F.collection(fs,pre+p);return Object.assign(Q(r,[]),{path:p,doc:id=>D(p+'/'+(id||Math.random().toString(36).slice(2))),add:async d=>{const x=await F.addDoc(r,d);return D(p+'/'+x.id)}})};
     return{doc:D,collection:C};
   }
-  window.FB.signOut=async()=>{try{await A.signOut(auth)}catch(e){}try{localStorage.removeItem('budget-v1')}catch(e){}location.reload()};
+  window.FB.signOut=async()=>{try{await A.signOut(auth)}catch(e){}try{localStorage.removeItem('budget-v1');localStorage.removeItem('budget-simplefin')}catch(e){}location.reload()};
   let started=false;
   A.onAuthStateChanged(auth,u=>{
     if(u){window.FB.email=u.email;gate.hidden=true;if(!started){started=true;window.FB._r({db:makeDb(u.uid)})}}
