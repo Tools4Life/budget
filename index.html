@@ -399,6 +399,13 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 .rvacts{display:flex;flex-wrap:wrap;gap:8px}
 .rvacts button{display:flex;align-items:center;gap:7px;border:1.5px solid var(--line);background:var(--bg);border-radius:999px;padding:8px 13px;font-weight:600;font-size:.88rem}
 .rvacts .emoji{font-size:1.05rem}
+.rvacts button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.rvpay{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;padding:10px;background:var(--surface);border-radius:16px}
+.rvpay button{display:flex;align-items:center;gap:10px;border:0;background:var(--bg);border-radius:12px;padding:8px 10px;font-weight:600;font-size:.9rem;text-align:left;min-width:0}
+.rvpay button span:last-child{overflow-wrap:anywhere;line-height:1.2}
+.rvpay .itile{width:32px;height:32px;border-radius:10px;font-size:.72rem}
+.rvpay .dtile{flex:none}
+.rvpay .rvsub{display:block;color:var(--muted);font-weight:500;font-size:.76rem}
 .rvcats{grid-template-columns:repeat(3,1fr)}
 @media (min-width:480px){.rvcats{grid-template-columns:repeat(4,1fr)}}
 .rvnav{margin-top:16px}
@@ -576,7 +583,8 @@ const CAT_EMOJI = ["💵","💰","💳","💸","🪙","🏦","💲","🤑","📈
 const BILL_EMOJI = ["💸","🏠","💡","💧","🔥","🗑️","📱","🌐","🚗","🛡️","💳","🛋️","🏥","👶","🎬","🎵","☁️","🏋️","📺","🍎","🧾"];
 const ACCT_COLORS = ["#1F5BFF","#12805C","#7A5AF8","#E8590C","#DD2590","#0E9384","#CA8504","#475467"];
 /* Colored initials for an account: "Amex Gold" -> AG, "WF Credit #1" -> WF, "Checking" -> C. */
-const acctInit = a => { const w = String(a.name||"?").replace(/[^A-Za-z0-9 ]/g," ").trim().split(/\s+/); return (/^[A-Z]{2,3}$/.test(w[0]) ? w[0] : w.slice(0,2).map(x=>x[0]).join("")).toUpperCase() || "?"; };
+const acctInit = a => { const w = String(a.name||"?").replace(/[^A-Za-z0-9 ]/g," ").trim().split(/\s+/), num = /^\d{1,2}$/.test(w[w.length-1]) && w.length > 1 ? w[w.length-1] : "";
+  return ((/^[A-Z]{2,3}$/.test(w[0]) ? w[0] : w.slice(0,2).map(x=>x[0]).join("")).slice(0, num ? 2 : 3) + num).toUpperCase() || "?"; };
 const acctTile = a => `<span class="itile" style="background:${esc(acctColor(a))}1F;color:${esc(acctColor(a))}" aria-hidden="true">${esc(acctInit(a))}</span>`;
 const acctColor = a => a.color || ACCT_COLORS[Math.abs([...String(a.id)].reduce((h,ch)=>(h*31+ch.charCodeAt(0))|0,7)) % ACCT_COLORS.length];
 const ACCT_EMOJI = ["🏦","💳","💰","🐷","📈","🛋️","🧾","💵"];
@@ -1999,16 +2007,22 @@ function bankMatch(b, used){
   const pool = state.cur.tx.concat(state.viewTx || []);
   return pool.find(t => !t.bank && !used.has(t.id) && t.amt === b.amt && (!t.acct || t.acct === b.acct) && Math.abs(t.ts - bankTs(b)) <= 4*DAY_MS) || null;
 }
+/* Banks abbreviate: "DOVENMUEHLE MTG MORTG PYMT" is a mortgage, "DUKE-ENERGY" is Duke Energy. */
+const BILL_ALIAS = {mortgage:["mtg","mortg","mort","mortgage","home loan"], insurance:["ins","insur"], electric:["elec"], energy:["enrgy"], water:["wtr"], phone:["wireless","verizon","att","t-mobile","tmobile"], internet:["spectrum","xfinity","comcast","att","fiber"], car:["auto"], payment:[]};
+function billNameHit(name, d){
+  const toks = d.split(/[^a-z0-9]+/).filter(Boolean);
+  return String(name).toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3).some(w =>
+    d.includes(w) || toks.some(t => t.length >= 4 && w.startsWith(t)) || (BILL_ALIAS[w] || []).some(al => al.includes(" ") ? d.includes(al) : toks.includes(al)));
+}
 /* An unpaid bill this month that this bank payment looks like: bill name in the description and/or the exact amount. */
 function bankBill(c, b, usedBills){
   if (b.amt <= 0 || b.month !== NOW) return null;
   const d = String(b.desc||"").toLowerCase(), paid = state.cur.paid;
   let best = null, score = 0;
   insts(c).forEach(x => {
-    if (paid[x.pid] || (usedBills && usedBills.has(x.pid))) return;
-    const words = String(x.name).toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3);
-    const nameHit = words.some(w => d.includes(w)), amtHit = b.amt >= 2000 && b.amt === billAmt(x);
-    const sc = (nameHit ? 2 : 0) + (amtHit ? 1 : 0) + (nameHit && x.varies ? 1 : 0);
+    if (usedBills && usedBills.has(x.pid)) return;
+    const nameHit = billNameHit(x.name, d), amtHit = b.amt >= 2000 && b.amt === billAmt(x);
+    const sc = (nameHit ? 2 : 0) + (amtHit ? 1 : 0) + (nameHit && x.varies ? 1 : 0) - (paid[x.pid] && (nameHit || amtHit) ? 0.5 : 0);  // already checked off: still a match, just ranked lower
     if (sc > score){ score = sc; best = x; }
   });
   return best;
@@ -2017,7 +2031,8 @@ function bankChoices(c, b, m, bill){
   const rule = c.bank.rules[merchKey(b.desc)] || "";
   const cats = c.categories.filter(k=>k.limit>0).concat(c.categories.filter(k=>!k.limit)).map(k => ({v:"c:"+k.id, e:k.emoji, n:k.name}));
   const work = {v:"work", e:"🧾", n:"Work", act:true}, skip = {v:"skip", e:"↔️", n:b.amt < 0 ? "Money in" : "Transfer", act:true};
-  const billCh = bill ? [{v:"bill:"+bill.pid, e:"📅", n:bill.name, act:true}] : [];
+  const billList = b.amt > 0 ? insts(c, b.month || NOW).slice().sort((p, q) => (bill && p.pid === bill.pid ? -1 : bill && q.pid === bill.pid ? 1 : 0) || p.day - q.day) : [];
+  const billCh = billList.map(x => ({v:"bill:"+x.pid, e:"📅", n:x.name, act:true, bill:x}));
   // Paying a card or loan the bank feed doesn't cover (Affirm, Klarna...): lowers what you owe there.
   const linked = new Set(Object.values(c.bank.links).filter(Boolean)), from = c.accounts.find(a=>a.id===b.acct);
   const payable = b.amt > 0 && (!from || !DEBT.has(from.type)) ? c.accounts.filter(a => DEBT.has(a.type)) : [];
@@ -2131,6 +2146,19 @@ function renderBank(){
       const {b, m, ch} = plan[idx], a = accts[b.acct], mk = m && c.categories.find(k=>k.id===m.cat), when = bankTs(b);
       const sug = ch.find(x => x.sug), others = ch.filter(x => x !== sug), acts = others.filter(x => !x.v.startsWith("c:")), cats = others.filter(x => x.v.startsWith("c:"));
       const dis = state.readOnly ? "disabled" : "";
+      // Card/loan payments collapse into one "Paid a card" button that opens the list of cards and loans.
+      // Bills and card/loan payments each collapse into one button that opens a list.
+      const groups = {bill: acts.filter(x => x.v.startsWith("bill:")), pay: acts.filter(x => x.v.startsWith("pay:"))};
+      const plain = acts.filter(x => !x.v.startsWith("bill:") && !x.v.startsWith("pay:"));
+      const btn = x => `<button data-pick="${esc(x.v)}" ${dis}><span class="emoji">${esc(x.e)}</span>${esc(x.v.startsWith("bill:") ? "Paid " + x.n : x.n)}</button>`;
+      const LBL = {bill:["📅","Paid a bill"], pay:["💸","Paid a card"]};
+      const menuBtn = g => groups[g].length === 1 ? btn(groups[g][0]) : groups[g].length ? `<button data-menu="${g}" aria-expanded="${state.rvMenu === g}" class="${state.rvMenu === g ? "on" : ""}" ${dis}><span class="emoji">${LBL[g][0]}</span>${LBL[g][1]}${state.rvMenu === g ? " ▴" : " ▾"}</button>` : "";
+      const actBtns = menuBtn("bill") + menuBtn("pay") + plain.map(btn).join("");
+      const paidNow = b.month === NOW ? state.cur.paid : {};
+      const item = x => { if (x.v.startsWith("pay:")){ const ac = accts[x.v.slice(4)]; return `<button data-pick="${esc(x.v)}" ${dis}>${ac ? acctTile(ac) : ""}<span>${esc(ac ? ac.name : x.n)}</span></button>`; }
+        const bl = x.bill, done = bl && paidNow[bl.pid];
+        return `<button data-pick="${esc(x.v)}" ${dis}><span class="dtile" style="width:32px;height:32px;border-radius:10px"><small>${esc(new Date(2000, (+String(b.month||NOW).slice(5)) - 1, 1).toLocaleDateString("en-US",{month:"short"}))}</small><b style="font-size:.85rem">${bl ? bl.day : ""}</b></span><span>${esc(x.n)}<small class="rvsub">${bl ? money(billAmt(bl)) : ""}${done ? " • already checked off" : ""}</small></span></button>`; };
+      const g = state.rvMenu, payOpen = g && groups[g] && groups[g].length > 1 ? `<div class="rvpay">${groups[g].map(item).join("")}</div>` : "";
       const name = cleanDesc(b.desc), showRaw = name.toLowerCase() !== String(b.desc).replace(/\s{2,}/g," ").trim().toLowerCase();
       h += `<div class="rv one" data-rv="${esc(b.id)}">
         <div class="rvamt ${b.amt < 0 ? "in" : ""}">${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</div>
@@ -2138,8 +2166,8 @@ function renderBank(){
         <div class="rvmeta">${esc(new Date(when).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}))}${a ? ` • <span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""}</div>
         ${showRaw ? `<div class="rvraw">${esc(b.desc)}</div>` : ""}
         ${m ? `<div class="match">Looks like your ${esc(m.note || (mk ? mk.name : "entry"))} entry from ${esc(new Date(m.ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}.</div>` : ""}
-        ${sug ? `<button class="primary rvsug" data-pick="${esc(sug.v)}" ${dis}><span class="emoji">${esc(sug.e)}</span> ${esc(sug.v.startsWith("c:") ? "File as " + sug.n : sug.n)}</button>` : ""}
-        ${acts.length ? `<div class="flabel">Not from your allowance</div><div class="rvacts">${acts.map(x => `<button data-pick="${esc(x.v)}" ${dis}><span class="emoji">${esc(x.e)}</span>${esc(x.n)}</button>`).join("")}</div>` : ""}
+        ${sug ? `<button class="primary rvsug" data-pick="${esc(sug.v)}" ${dis}><span class="emoji">${esc(sug.e)}</span> ${esc(sug.v.startsWith("c:") ? "File as " + sug.n : sug.v.startsWith("bill:") ? "Paid " + sug.n + " bill" : sug.n)}</button>` : ""}
+        ${acts.length ? `<div class="flabel">Not from your allowance</div><div class="rvacts">${actBtns}</div>${payOpen}` : ""}
         <div class="flabel">${sug && sug.v.startsWith("c:") ? "Other category" : "Category"}</div>
         <div class="catpick rvcats">${cats.map(x => `<button type="button" data-pick="${esc(x.v)}" ${dis}><span class="emoji">${esc(x.e)}</span><span>${esc(x.n)}</span></button>`).join("")}</div>
         <div class="btnrow rvnav"><button class="small-ghost" id="rvPrev" ${idx === 0 ? "disabled" : ""}>‹ Back</button><button class="small-ghost" id="rvNext" ${idx >= n - 1 ? "disabled" : ""}>Skip for now ›</button></div>
@@ -2215,7 +2243,7 @@ function learnedForm(key){
 function rvGo(d){
   const n = state.bankNew.length; if (!n) return;
   const ni = Math.max(0, Math.min((state.rvIdx||0) + d, n - 1)); if (ni === state.rvIdx) return;
-  state.rvIdx = ni; renderBank();
+  state.rvIdx = ni; state.rvMenu = null; renderBank();
   const card = $("bankBody").querySelector(".rv.one"); if (card && card.getBoundingClientRect().top < 60) card.scrollIntoView({block:"start", behavior:"smooth"});
 }
 let rvSw = null;
@@ -2225,7 +2253,8 @@ $("bankBody").addEventListener("touchend", e => { if (!rvSw) return; const t = e
 document.addEventListener("keydown", e => { if (state.view !== "bank" || /input|textarea|select/i.test((e.target||{}).tagName||"")) return; if (e.key === "ArrowRight") rvGo(1); if (e.key === "ArrowLeft") rvGo(-1); });
 $("bankBody").addEventListener("click", async e => {
   const pk = e.target.closest("[data-pick]");
-  if (pk){ const card = pk.closest("[data-rv]"), b = state.bankNew.find(x=>x.id===card.dataset.rv); if (b){ card.classList.add("busy"); bankResolve(b, pk.dataset.pick); } return; }
+  const mb = e.target.closest("[data-menu]"); if (mb){ state.rvMenu = state.rvMenu === mb.dataset.menu ? null : mb.dataset.menu; return renderBank(); }
+  if (pk){ state.rvMenu = null; const card = pk.closest("[data-rv]"), b = state.bankNew.find(x=>x.id===card.dataset.rv); if (b){ card.classList.add("busy"); bankResolve(b, pk.dataset.pick); } return; }
   const id = (e.target.closest("button")||{}).id;
   if (id !== "sfDisconnect" && state.sfConfirm){ state.sfConfirm = false; }
   if (id === "sfConnect"){ const v = $("sfToken").value.trim(); if (!v) return toast("Paste the setup token first."); return bankConnect(v); }
