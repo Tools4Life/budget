@@ -75,10 +75,18 @@ button{cursor:pointer}
 .pagepad{max-width:640px;margin:0 auto;padding:18px 18px 40px}
 
 /* home */
-.hero{background:var(--accent);color:#fff;border-radius:24px;padding:20px 20px 18px}
+.hero{background:var(--accent);color:#fff;border-radius:24px;padding:20px 20px 18px;position:relative;overflow:hidden;
+  background-image:linear-gradient(140deg,rgba(255,255,255,.22) 0%,rgba(255,255,255,.06) 45%,rgba(0,0,0,.10) 100%);
+  box-shadow:0 14px 30px -14px rgba(16,24,40,.55),0 2px 6px -2px rgba(16,24,40,.18),inset 0 1px 0 rgba(255,255,255,.28)}
+.hero::after{content:"";position:absolute;right:-60px;top:-70px;width:220px;height:220px;border-radius:50%;background:radial-gradient(closest-side,rgba(255,255,255,.18),rgba(255,255,255,0));pointer-events:none}
+.hero > *{position:relative;z-index:1}
+.hbills{background-color:#7A5AF8}
+.hplan{background-color:#0E9384}
+.hhist{background-color:#3E4FD8}
+.hbills .big,.hplan .big,.hhist .big{font-size:clamp(2.4rem,11vw,3rem);margin:4px 0 6px}
 .hero .lbl{font-weight:600;opacity:.9}
 .hero .big{color:#fff;font-size:clamp(2.8rem,13vw,3.6rem);margin:6px 0 10px}
-.hero.neg{background:var(--warn)}
+.hero.neg{background-color:var(--warn)}
 .hero .meter{height:8px;border-radius:99px;background:rgba(255,255,255,.28);overflow:hidden}
 .hero .meter i{display:block;height:100%;background:#fff;border-radius:99px}
 .hero .fine{font-size:.86rem;opacity:.92;margin-top:10px;line-height:1.35}
@@ -380,8 +388,8 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 .asub:first-of-type{margin-top:4px}
 .hzline{display:flex;align-items:center;gap:10px;width:100%;margin-top:10px;border:1.5px solid color-mix(in srgb,var(--good) 35%,transparent);background:color-mix(in srgb,var(--good) 9%,var(--bg));color:var(--good);border-radius:16px;padding:12px 14px;font-weight:600;text-align:left}
 .hzline span{flex:1}
-.pghero{background:var(--good)}
-.pghero.neg{background:var(--warn)}
+.pghero{background-color:var(--good)}
+.pghero.neg{background-color:var(--warn)}
 .pghero .fine b{color:#fff}
 .hero .ibtn{border-color:rgba(255,255,255,.55);color:#fff;background:transparent;width:20px;height:20px;vertical-align:-4px}
 .ibtn{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line);background:var(--bg);color:var(--muted);font:italic 700 .78rem/1 Georgia,"Times New Roman",serif;padding:0;margin-left:7px;flex:none;cursor:pointer;vertical-align:1px}
@@ -1353,8 +1361,8 @@ function renderHorizon(){
   const cards = c.accounts.filter(a => a.work);
   const accts = Object.fromEntries(c.accounts.map(a => [a.id, a]));
   const mo = keyToDate(NOW).toLocaleString("en-US",{month:"long"});
-  let html = `<div class="hero" style="background:var(--good)"><div class="lbl">Horizon owes you</div><div class="big">${whole(owed)}</div>
-    <div class="fine">${h && h.updated ? "Updated " + esc(new Date(h.updated).toLocaleDateString("en-US",{month:"short",day:"numeric"})) + " • " : ""}work expenses go up, paycheck reimbursements come down${ib("Work expenses (the Work button or the Work Expense category) add to this and never come out of your allowance. When a paycheck includes a reimbursement line, filing it as Paycheck in Review takes that amount off.")}</div></div>`;
+  let html = `<div class="hero" style="background-color:var(--good)"><div class="lbl">Horizon owes you</div><div class="big">${whole(owed)}</div>
+    <div class="fine">${h && h.updated ? "Updated " + esc(new Date(h.updated).toLocaleDateString("en-US",{month:"short",day:"numeric"})) + " • " : ""}work expenses go up, paycheck reimbursements come down</div></div>`;
   html += `<h2>${h2t("Work expenses in " + mo)} <small>${work.length ? money(wt) : ""}</small></h2>`;
   html += work.length ? `<div class="list">` + work.map(t => { const a = accts[t.acct]; return `<button class="row rowbtn" data-hwork="${esc(t.id)}" ${state.readOnly ? "disabled" : ""}>${a ? acctTile(a) : `<span class="itile">?</span>`}<div class="grow"><div class="t">${esc(t.note || t.catName || "Work expense")}</div><div class="m">${esc(new Date(t.ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}${a ? " • " + esc(a.name) : ""}</div></div><span class="v">${money(t.amt)}</span></button>`; }).join("") + `</div>`
     : `<div class="list"><div class="empty">No work expenses yet this month.</div></div>`;
@@ -1557,11 +1565,9 @@ function renderBills(){
   const r = calc(), c = r.c;
   const mo = keyToDate(NOW).toLocaleString("en-US",{month:"short"});
   const subTotal = insts(c).filter(b=>b.type==="sub").reduce((a,b)=>a+billAmt(b),0);
-  let html = `<div class="card">
-    <div class="sum"><span>All bills this month</span><b>${money(r.billsTotal)}</b></div>
-    <div class="sum"><span>Subscriptions</span><b>${money(subTotal)}</b></div>
-    <div class="sum"><span>Paid</span><b>${money(r.billsTotal - r.billsDue)}</b></div>
-    <div class="sum total"><span>Still due${ib("Every bill is set aside from your income at the start of the month, paid or not, so your allowance is already what's truly free. Bills that change monthly use their typical amount until you enter this month's.")}</span><b>${money(r.billsDue)}</b></div></div>
+  const moLong = keyToDate(NOW).toLocaleString("en-US",{month:"long"});
+  let html = `<div class="hero hbills"><div class="lbl">${r.billsDue ? "Still due in " + moLong : "All paid for " + moLong}</div><div class="big">${whole(r.billsDue)}</div>
+    <div class="fine">${money(r.billsTotal)} in bills${subTotal ? " • " + money(subTotal) + " subscriptions" : ""} • ${money(r.billsTotal - r.billsDue)} paid</div></div>
     <div class="filters" role="group" aria-label="Filter">` +
     [["all","All"],["bill","Bills"],["sub","Subscriptions"]].map(([k,n]) => `<button class="fchip" data-f="${k}" aria-pressed="${state.billFilter===k}">${n}</button>`).join("") + `</div>`;
   const list = insts(c).filter(b => state.billFilter==="all" || b.type===state.billFilter).sort((a,b)=>a.day-b.day || a.name.localeCompare(b.name));
@@ -1659,9 +1665,9 @@ function renderPlanner(){
   const r = calc(), c = r.c;
   const mo = keyToDate(NOW).toLocaleString("en-US",{month:"long"});
   const savedDone = !!state.cur.paid.__savings;
-  let html = `<div class="card">
-    <div class="m" style="font-weight:600">Allowance left in ${mo}</div>
-    <div class="big ${r.left<0?"neg":""}" style="margin:6px 0 14px">${signed(r.left)}</div>
+  let html = `<div class="hero hplan"><div class="lbl">To spend each month</div><div class="big">${r.hasIncome ? signed(r.available) : "Add your income"}</div>
+    <div class="fine">${r.hasIncome ? `After bills and savings • ${r.unassigned >= 0 ? whole(r.unassigned) + " not in a budget yet" : whole(-r.unassigned) + " more budgeted than you have"}` : "Bills and savings come out first"}</div></div>
+  <div class="card" style="margin-top:12px">
     <div class="sum"><span>Monthly take-home income</span><input class="minput" inputmode="decimal" data-plan="income" value="${c.income ? (c.income/100).toFixed(0) : ""}" placeholder="0" aria-label="Monthly take-home income" ${state.readOnly?"disabled":""}></div>
     <div class="sum"><span>Bills and subscriptions</span><b>−${money(r.billsTotal)}</b></div>
     <div class="sum"><span>Savings goal <button class="fchip" data-saved style="padding:2px 9px;margin-left:4px;font-size:.78rem" aria-pressed="${savedDone}" ${state.readOnly?"disabled":""}>${savedDone ? "Moved" : "Mark moved"}</button></span><input class="minput" inputmode="decimal" data-plan="savings" value="${c.savings ? (c.savings/100).toFixed(0) : ""}" placeholder="0" aria-label="Monthly savings goal" ${state.readOnly?"disabled":""}></div>
@@ -1936,7 +1942,10 @@ function renderHistory(){
   const full = months.filter(m => m !== NOW && data[m].count);
   const avgAll = full.length ? Math.round(full.reduce((s,m)=>s+data[m].total,0)/full.length) : 0;
   const ml = (m, o) => keyToDate(m).toLocaleString("en-US", o||{month:"short"});
-  let h = `<h2 style="margin-top:4px">Spending by month <small>${full.length ? "avg " + whole(avgAll) + " a month" : ""}</small></h2>
+  const selTot = data[H.sel] ? data[H.sel].total : 0;
+  let h = `<div class="hero hhist"><div class="lbl">Spent in ${ml(H.sel,{month:"long"})}${H.sel === NOW ? " so far" : ""}</div><div class="big">${whole(selTot)}</div>
+    <div class="fine">${full.length ? "Your average is " + whole(avgAll) + " a month" + (H.sel !== NOW && avgAll ? (selTot > avgAll ? " • " + whole(selTot - avgAll) + " above" : " • " + whole(avgAll - selTot) + " below") : "") : "Averages start once a month is finished"}</div></div>
+  <h2>Spending by month <small>${full.length ? "avg " + whole(avgAll) + " a month" : ""}</small></h2>
     <div class="card"><div class="hbars">` + months.map(m => `<button class="hbar" data-hm="${m}" aria-pressed="${m===H.sel}" aria-label="${ml(m,{month:"long",year:"numeric"})}: ${money(data[m].total)}"><em>${data[m].total ? whole(data[m].total) : ""}</em><i style="height:${(data[m].total/top*100).toFixed(1)}%"></i><small>${ml(m)}</small></button>`).join("") + `</div></div>`;
   if (months.length === 1) h += `<p class="hint">${ml(NOW,{month:"long"})} is your first month. Each month you use the app adds a bar here, and averages start once a month is finished.</p>`;
   const d = data[H.sel], sn = d.snap;
