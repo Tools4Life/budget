@@ -374,6 +374,18 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 /* bank sync (SimpleFIN) */
 .navbtn .nbadge{margin-left:auto;min-width:22px;height:22px;border-radius:11px;background:var(--accent);color:#fff;font-size:.75rem;font-weight:800;display:grid;place-items:center;padding:0 6px}
 .nbadge[hidden]{display:none}
+.ibtn{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line);background:var(--bg);color:var(--muted);font:italic 700 .78rem/1 Georgia,"Times New Roman",serif;padding:0;margin-left:7px;flex:none;cursor:pointer;vertical-align:1px}
+.ibtn:hover{border-color:var(--muted);color:var(--ink)}
+.h2t{display:inline-flex;align-items:center}
+.flrow{display:flex;align-items:center}
+.flrow .ibtn{margin:14px 0 6px 6px}
+#infoPop{position:fixed;z-index:80;background:var(--ink);color:var(--bg);padding:10px 13px;border-radius:12px;font-size:.86rem;line-height:1.38;font-weight:500;box-shadow:0 10px 30px rgba(16,24,40,.25)}
+#infoPop[hidden]{display:none}
+.syncline{display:flex;align-items:center;gap:14px;margin-top:14px;padding:0 4px;color:var(--muted);font-size:.84rem}
+.syncline span{flex:1}
+.syncline .linkbtn{padding:0;font-size:.84rem}
+.seg.many{display:grid;grid-template-columns:repeat(3,1fr)}
+.seg.many button{padding:9px 4px;font-size:.9rem;white-space:nowrap}
 .itile{width:42px;height:42px;border-radius:14px;background:var(--surface);color:var(--muted);display:grid;place-items:center;flex:none;font-weight:800;font-size:.86rem;letter-spacing:.02em}
 .dtile{width:42px;height:42px;border-radius:12px;flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--surface);line-height:1}
 .dtile small{font-size:.6rem;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.06em}
@@ -385,7 +397,7 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 .estline span{flex:1}.estline b{color:var(--ink)}
 .estline .linkbtn{padding:4px 2px;font-size:.88rem}
 #homeBody .hright>.estline:first-child{margin-top:0}
-#accountsBody .row .m{white-space:normal}
+#accountsBody .row .m,#settingsBody .row .m{white-space:normal}
 .rv.one{padding:20px 16px 14px;text-align:center}
 .rvamt{font-size:2.5rem;font-weight:800;letter-spacing:-.03em;line-height:1.05}
 .rvamt.in{color:var(--good)}
@@ -588,8 +600,11 @@ const acctInit = a => { const w = String(a.name||"?").replace(/[^A-Za-z0-9 ]/g,"
 const acctTile = a => `<span class="itile" style="background:${esc(acctColor(a))}1F;color:${esc(acctColor(a))}" aria-hidden="true">${esc(acctInit(a))}</span>`;
 const acctColor = a => a.color || ACCT_COLORS[Math.abs([...String(a.id)].reduce((h,ch)=>(h*31+ch.charCodeAt(0))|0,7)) % ACCT_COLORS.length];
 const ACCT_EMOJI = ["🏦","💳","💰","🐷","📈","🛋️","🧾","💵"];
-const ACCT_TYPES = [["checking","Checking"],["savings","Savings"],["credit","Credit card"],["loan","Loan or BNPL"],["reimb","Owed to me"]];
+const ACCT_TYPES = [["checking","Checking"],["savings","Savings"],["credit","Credit card"],["loan","Loan / BNPL"],["reimb","Owed to me"]];
 const DEBT = new Set(["credit","loan"]);
+/* Small (i) that shows a short explanation on tap, instead of paragraphs of helper text. */
+const ib = t => `<button type="button" class="ibtn" data-info="${esc(t)}" aria-label="More info">i</button>`;
+const h2t = (title, info) => `<span class="h2t">${title}${info ? ib(info) : ""}</span>`;
 /* A category named "Work…" (e.g. "Work Expense") always means a Horizon expense: owed to you, never from the allowance. */
 const isWorkCat = k => !!k && /\bwork\b/i.test(k.name || "");
 const EMOJI_BY_ID = {groceries:"🛒",eating:"🍔",gas:"⛽",other:"📦",household:"🏠"};
@@ -782,7 +797,8 @@ function editCfg(mut){ const c = cfg(); mut(c); store.saveCfg(c); }
 
 /* ---------------- live balances ---------------- */
 // amt > 0 means money going out: cash balances drop, card/loan balances (what you owe) rise.
-function moveBal(c, id, amt){ const a = c.accounts.find(x=>x.id===id); if (!a || !amt) return; a.balance += DEBT.has(a.type) ? amt : (a.type === "reimb" ? 0 : -amt); a.updated = Date.now(); }
+// Accounts linked to the bank feed always show the bank's number: nothing typed in the app nudges them between syncs.
+function moveBal(c, id, amt){ const a = c.accounts.find(x=>x.id===id); if (!a || !amt) return; if (c.bank && Object.values(c.bank.links || {}).includes(id)) return; a.balance += DEBT.has(a.type) ? amt : (a.type === "reimb" ? 0 : -amt); a.updated = Date.now(); }
 function ensureHz(c){ let a = c.accounts.find(x=>x.type==="reimb"); if (!a){ a = {id:"horizon",name:"Owed by Horizon",emoji:"🧾",type:"reimb",color:"#12805C",balance:0,updated:0,apr:null,min:0,due:0}; c.accounts.push(a); } return a; }
 // Bank-imported transactions (t.bank) never move balances: linked accounts take the bank's balance on every sync.
 function applyTx(c, t, sign){ if (t.acct && !t.bank) moveBal(c, t.acct, sign*t.amt);if (t.work){ const h = ensureHz(c); h.balance += sign*t.amt; h.updated = Date.now(); } }
@@ -1191,7 +1207,7 @@ function renderActivity(){
   const total = txs.reduce((a,t)=>a+(t.work?0:t.amt),0), workTot = txs.reduce((a,t)=>a+(t.work?t.amt:0),0);
   const label = keyToDate(state.viewMonth).toLocaleString("en-US",{month:"long",year:"numeric"});
   let html = `<div class="monthnav"><button data-m="-1" aria-label="Previous month">‹</button><div>${label}</div><button data-m="1" aria-label="Next month" ${isNow?"disabled":""}>›</button></div>`;
-  html += `<h2 style="margin-top:14px">Spending <small>${txs.length ? money(total) + " spent" + (workTot ? " • " + money(workTot) + " work" : "") : ""}${billTot ? (txs.length ? " • " : "") + money(billTot) + " bills" : ""}</small></h2>`;
+  html += `<h2 style="margin-top:14px">${h2t("Spending", "Tap a purchase to edit or delete it. Gray rows are bills, card payments and money in; bills are changed on Bills.")} <small>${txs.length ? money(total) + " spent" + (workTot ? " • " + money(workTot) + " work" : "") : ""}${billTot ? (txs.length ? " • " : "") + money(billTot) + " bills" : ""}</small></h2>`;
   if (!list.length) html += `<div class="list"><div class="empty">Nothing logged in ${esc(label)}. ${isNow ? "Tap the blue + after each purchase." : ""}</div></div>`;
   else {
     let lastDay = null, open = false;
@@ -1219,7 +1235,6 @@ function renderActivity(){
       </${state.readOnly?"div":"button"}>`;
     });
     if (open) html += "</div>";
-    if (!state.readOnly) html += `<p class="hint">Tap a purchase to edit or delete it. Gray rows are bills, card payments, and money in. Bills are changed on Bills.</p>`;
   }
   html += `<button class="ghost" id="exportCsv" style="border-style:solid">Export ${esc(label)} as CSV</button>`;
   $("activityBody").innerHTML = html;
@@ -1302,8 +1317,7 @@ function payForm(draft){
       {k:"acct", type:"select", label:"Deposited to", options:cash.map(a=>[a.id,a.name]), value: val("acct", defaultPayFrom(c) || cash[0].id)},
       {k:"amt", type:"money", label:"Amount", value: val("amt", 0), focus:true},
       {k:"note", type:"text", label:"From (optional)", value: val("note", ""), placeholder:"Side job, sold item, gift"},
-      {k:"spend", type:"seg", label:"Add it to this month's allowance?", options:[["no","No, balance only"],["yes","Yes, spend it"]], value: val("spend","no")}],
-    extra:`<div class="fhelp">"No" raises the account balance only, which is right for money you're saving or using to pay down debt. "Yes" also raises this month's allowance.</div>`,
+      {k:"spend", type:"seg", label:"Add it to this month's allowance?", options:[["no","No, balance only"],["yes","Yes, spend it"]], value: val("spend","no"), help:"No: raises the account balance only, which is right for money you're saving or putting toward debt. Yes: also raises this month's allowance."}],
     saveLabel:"Add to account",
     onToggle: cur => payForm(cur),
     onSave: v => {
@@ -1348,10 +1362,9 @@ function xpayForm(toId){
       {k:"to", type:"select", label:"Pay down", options:toOpts, value: toId || debts[0].id},
       {k:"from", type:"select", label:"Paid from", options:srcs.map(a=>[a.id, a.name + " (" + money(a.balance) + ")"]), value: defaultPayFrom(c) || srcs[0].id},
       {k:"amt", type:"money", label:"Amount", value:0, focus:true},
-      {k:"budget", type:"seg", label:"What does it pay for?", options:[["debt","Old balance"],["logged","Logged charges"]], value:"debt"},
+      {k:"budget", type:"seg", label:"What does it pay for?", options:[["debt","Old balance"],["logged","Logged charges"]], value:"debt", help:"Old balance: debt from before you started tracking, or anything never logged here. Counts against this month's allowance. Logged charges: purchases already logged on this card, or Horizon work expenses. Doesn't touch your allowance."},
       {k:"note", type:"text", label:"Note (optional)", value:"", placeholder:"Paid off early"}
     ].concat(plans.length ? [{k:"payoff", type:"seg", label:"If you picked a plan: does this pay it off?", options:[["no","No, partial"],["yes","Yes, paid off"]], value:"no"}] : []),
-    extra:`<div class="fhelp"><b>Old balance:</b> debt from before you started tracking, or anything never logged here. Counts against this month's allowance.<br><b>Logged charges:</b> purchases you already logged on this card, or Horizon work expenses. Doesn't touch your allowance, because those were already counted or aren't yours.</div>`,
     saveLabel:"Make payment",
     onSave: v => {
       if (!v.amt) return "Enter an amount.";
@@ -1407,7 +1420,7 @@ function acctForm(a, presetType){
       {k:"name", type:"text", label:"Name", value:a.name, placeholder:"Chase checking"},
       {k:"color", type:"color", label:"Color", options:ACCT_COLORS, value:acctColor(a)},
       {k:"type", type:"seg", label:"Type", options:ACCT_TYPES, value:a.type},
-      {k:"balance", type:"money", label:"Current balance (for cards and loans, what you owe)", value:a.balance, help:"Typing the real number from your bank or card app here is how you reconcile. Do it once a month."}
+      {k:"balance", type:"money", label: DEBT.has(a.type) ? "Balance owed" : "Current balance", value:a.balance, help: Object.values(cfg().bank.links).includes(a.id) ? "Linked to your bank, so this updates on every sync. Anything typed here is replaced at the next sync." : "For cards and loans, enter what you owe. Typing the real number from your bank or card app once a month keeps it accurate."}
     ],
     saveLabel: isNew ? "Add account" : "Save account",
     onSave: v => { if (!v.name) return "Give the account a name.";
@@ -1433,8 +1446,7 @@ function renderBills(){
     <div class="sum"><span>All bills this month</span><b>${money(r.billsTotal)}</b></div>
     <div class="sum"><span>Subscriptions</span><b>${money(subTotal)}</b></div>
     <div class="sum"><span>Paid</span><b>${money(r.billsTotal - r.billsDue)}</b></div>
-    <div class="sum total"><span>Still due</span><b>${money(r.billsDue)}</b></div></div>
-    <p class="hint">Every bill is set aside from your income at the start of the month, paid or not, so your allowance is already what's truly free. Bills that change monthly use their typical amount until you enter this month's.</p>
+    <div class="sum total"><span>Still due${ib("Every bill is set aside from your income at the start of the month, paid or not, so your allowance is already what's truly free. Bills that change monthly use their typical amount until you enter this month's.")}</span><b>${money(r.billsDue)}</b></div></div>
     <div class="filters" role="group" aria-label="Filter">` +
     [["all","All"],["bill","Bills"],["sub","Subscriptions"]].map(([k,n]) => `<button class="fchip" data-f="${k}" aria-pressed="${state.billFilter===k}">${n}</button>`).join("") + `</div>`;
   const list = insts(c).filter(b => state.billFilter==="all" || b.type===state.billFilter).sort((a,b)=>a.day-b.day || a.name.localeCompare(b.name));
@@ -1541,7 +1553,7 @@ function renderPlanner(){
     <div class="sum total"><span>Available to spend</span><b>${money(r.available)}</b></div>
     <div class="sum"><span>Spent so far</span><b>−${money(r.spent)}</b></div>
   </div>`;
-  if (!r.hasIncome) html += `<p class="hint">Enter your monthly take-home pay so bills and savings come out before anything else. Until then, your allowance uses your category plan.</p>`;
+  if (!r.hasIncome) html += `<p class="hint">Add your monthly take-home pay so bills and savings come out first.</p>`;
   const catRow = k => {
     const sp = r.spentBy[k.id]||0, pct = k.limit ? Math.min(100, sp/k.limit*100) : 0, over = k.limit && sp > k.limit;
     return `<button class="row" data-catedit="${esc(k.id)}" ${state.readOnly?"disabled":""}><span class="ebub emoji">${esc(k.emoji)}</span>
@@ -1557,7 +1569,6 @@ function renderPlanner(){
     html += `<button class="ghost" id="addCatBtn">Add category</button>`;
     if (!others.length || others.length < 3) html += `<button class="ghost" id="suggestBtn" style="border-style:solid">Add suggested categories</button>`;
   }
-  html += `<p class="hint">Every category shows in the emoji row when you add a transaction, budgets first.</p>`;
   $("plannerBody").innerHTML = html;
 }
 $("plannerBody").addEventListener("change", e => {
@@ -1757,7 +1768,7 @@ function renderHistory(){
     return `<button class="hrow ${over?"over":""}" data-hc="${esc(r.id)}" aria-expanded="${open}"><div class="top"><span class="ebub emoji">${esc(em)}</span>
       <div class="grow"><div class="t" style="font-weight:600">${esc(nm)}</div><div class="m" style="color:${over?"var(--warn)":"var(--muted)"};font-size:.8rem">${r.lim ? (over ? whole(r.sp-r.lim) + " over " + whole(r.lim) + " budget" : whole(r.lim-r.sp) + " under " + whole(r.lim) + " budget") : "No budget"}${avg !== null ? " • avg " + whole(avg) : ""}</div></div>
       <span class="v">${money(r.sp)}</span></div>${r.lim ? `<div class="mini"><i style="width:${Math.min(100, r.sp/r.lim*100).toFixed(1)}%"></i></div>` : ""}${trend}</button>`;
-  }).join("") + `</div><p class="hint">Tap a category to see it month by month.</p>`;
+  }).join("") + `</div>`;
   h += `<div style="height:28px"></div>`;
   $("historyBody").innerHTML = h;
 }
@@ -1791,13 +1802,12 @@ async function saveFile(name, text, type){
 const lastBackup = () => { try{ return +localStorage.getItem("budget-lastbackup") || 0; }catch(e){ return 0; } };
 function renderSettings(){
   const lb = lastBackup(), pend = state.restore;
-  let h = `<h2 style="margin-top:4px">Backup</h2>
-    <p class="settext">${state.mode === "db" ? "Your budget saves automatically to your account, so it's there on any device you sign in on. A backup file is your copy if the app or account ever has a problem." : "This copy saves only in this browser. Download a backup so you don't lose it."}</p>
+  let h = bankSetupHtml() + `<h2>${h2t("Backup", (state.mode === "db" ? "Your budget saves automatically to your account, so it's there on any device you sign in on. A backup file is your own copy if the app or account ever has a problem." : "This copy saves only in this browser. Download a backup so you don't lose it.") + " Save it to iCloud Drive or Google Drive. Once a month is plenty.")}</h2>`;
+  h += `
     <div class="list">
       <button class="row" id="bkJson"><div class="grow"><div class="t" style="font-weight:600">Download full backup</div><div class="m" style="color:var(--muted);font-size:.8rem">Everything: settings, bills, accounts, every transaction, every month. ${lb ? "Last downloaded on this device " + new Date(lb).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) + "." : "Not downloaded yet on this device."}</div></div></button>
       <button class="row" id="bkCsv"><div class="grow"><div class="t" style="font-weight:600">Download all transactions (CSV)</div><div class="m" style="color:var(--muted);font-size:.8rem">Opens in Numbers, Excel, or Google Sheets. Can't be restored from.</div></div></button>
     </div>
-    <p class="hint">Save the file to iCloud Drive or Google Drive, not just your phone. Once a month is plenty.</p>
     <h2>Restore</h2>`;
   if (pend){
     h += `<div class="card"><div class="sum"><span>Backup from</span><b>${pend.exported ? new Date(pend.exported).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "unknown date"}</b></div>
@@ -1936,7 +1946,7 @@ const bankName = (id, n) => ({name:n.name, org:n.org, bal:n.bal, at:n.at});
 
 async function bankConnect(token){
   if (state.bankBusy || state.readOnly) return;
-  state.bankBusy = true; renderBank();
+  state.bankBusy = true; renderBankUI();
   try{
     const url = await sfClaim(token);
     sfSave({url, at:Date.now()});
@@ -2119,7 +2129,7 @@ function bankTxForm(t){
     fields:[
       {k:"cat", type:"catpick", label:"Category", options:c.categories.map(k=>[k.id,k.emoji,k.name]), value:t.cat},
       {k:"kind", type:"seg", label:"Who pays", options:[["personal","Personal"],["work","Work (reimbursed)"]], value:t.work ? "work" : "personal"}],
-    extra:`<div class="fhelp">${t.amt < 0 ? "+" + money(-t.amt) : money(t.amt)} on ${esc(new Date(t.ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}${a ? " • " + esc(a.name) : ""}. Imported from your bank, so the amount and date stay as the bank has them.</div>`,
+    extra:`<div class="fhelp">${t.amt < 0 ? "+" + money(-t.amt) : money(t.amt)} on ${esc(new Date(t.ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}${a ? " • " + esc(a.name) : ""}${ib("Imported from your bank, so the amount and date stay as the bank has them.")}</div>`,
     saveLabel:"Save",
     onSave: v => {
       const k = c.categories.find(x=>x.id===v.cat); if (!k) return "Pick a category.";
@@ -2150,7 +2160,7 @@ function renderBank(){
     const plan = items.map(b => { const m = bankMatch(b, used); if (m) used.add(m.id); const bl = m ? null : bankBill(c, b, usedBills); if (bl) usedBills.add(bl.pid); return {b, m, ch:bankChoices(c, b, m, bl)}; });
     state.bankPlan = plan;
     const sugN = plan.filter(x => x.ch[0] && x.ch[0].sug).length;
-    h += `<h2 style="margin-top:4px">From your bank <small>${items.length ? Math.min((state.rvIdx||0) + 1, items.length) + " of " + items.length : ""}</small></h2>`;
+    h += `<h2 style="margin-top:4px">${h2t("From your bank", "Filing one shows the next; swipe or use Back and Skip to move around. Paying a card shows up on both accounts: file the checking side as Paid a card and the card side as Money in. Anything filed wrong can be changed in Activity.")} <small>${items.length ? Math.min((state.rvIdx||0) + 1, items.length) + " of " + items.length : ""}</small></h2>`;
     if (!items.length) h += `<div class="list"><div class="empty">All caught up. New bank transactions show up here after each sync.</div></div>`;
     if (sugN >= 2 && !state.readOnly) h += `<button class="ghost" id="sfBulk" style="border-style:solid;margin:0 0 4px">File ${sugN} highlighted picks</button>`;
     if (plan.length){
@@ -2184,35 +2194,44 @@ function renderBank(){
         <div class="catpick rvcats">${cats.map(x => `<button type="button" data-pick="${esc(x.v)}" ${dis}><span class="emoji">${esc(x.e)}</span><span>${esc(x.n)}</span></button>`).join("")}</div>
         <div class="btnrow rvnav"><button class="small-ghost" id="rvPrev" ${idx === 0 ? "disabled" : ""}>‹ Back</button><button class="small-ghost" id="rvNext" ${idx >= n - 1 ? "disabled" : ""}>Skip for now ›</button></div>
       </div>
-      <p class="hint">Swipe or use Back and Skip to move between items. Filing one shows the next. Paying a card from checking shows up on both accounts: file both as Transfer. Anything filed wrong can be changed in Activity.</p>`;
+`;
     }
   }
-  h += `<h2>${key ? "Bank connection" : "Connect your banks"}</h2>`;
+  if (!key && !anyLink && !state.bankNew.length)
+    h += `<div class="card" style="margin-top:4px"><div class="t" style="white-space:normal">Bring in transactions from your bank</div><div class="m" style="white-space:normal;margin:4px 0 12px">Connect once, and new purchases show up here to file with one tap.</div><button class="small-primary" data-goto="settings" style="width:100%">Set up bank sync</button></div>`;
+  else h += `<div class="syncline"><span>${key ? (state.bankBusy ? "Syncing…" : bk.lastSync ? "Synced " + esc(syncWhen(bk.lastSync)) : "Not synced yet") : "Syncs from another device"}</span>${key && anyLink && !state.readOnly ? `<button class="linkbtn" id="sfSync" ${state.bankBusy ? "disabled" : ""}>Sync now</button>` : ""}<button class="linkbtn" data-goto="settings">Bank settings</button></div>`;
+  h += `<div style="height:28px"></div>`;
+  $("bankBody").innerHTML = h;
+}
+const syncWhen = t => { const d = new Date(t), tm = d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}); return dateStr(t) === todayStr() ? "today " + tm : d.toLocaleDateString("en-US",{month:"short",day:"numeric"}) + ", " + tm; };
+/* Bank sync setup lives in Settings: connect, match accounts, learned stores, disconnect. */
+function bankSetupHtml(){
+  const c = cfg(), bk = c.bank, key = sfKey(), names = Object.entries(bk.names), anyLink = Object.values(bk.links).some(Boolean);
+  const accts = Object.fromEntries(c.accounts.map(a=>[a.id,a]));
+  let h = "";
+  h += `<h2 id="bankSec" style="margin-top:4px">${h2t("Bank sync", "Reads balances and transactions from your banks through SimpleFIN Bridge ($15 a year). It can't move money. Syncs by itself when you open the app, at most every 4 hours; banks update about once a day.")}</h2>`;
+  if (state.bankErr.length) h += `<div class="warnbox" style="margin:0 0 10px">${state.bankErr.map(esc).join("<br>")}</div>`;
   if (!key){
-    if (anyLink) h += `<p class="settext">Bank sync is set up on another device, which pulls in new transactions. You can review them here. To sync from this device instead, connect it with its own setup token.</p>`;
+    if (anyLink) h += `<p class="settext">Syncing runs on another device. To sync from this one too, connect it with its own setup token.</p>`;
     h += `<div class="card"><ol class="steps">
       <li>Open the <a href="${SF_SIGNUP}" target="_blank" rel="noopener">SimpleFIN Bridge</a>, sign up ($15 a year), and connect your banks there.</li>
       <li>On the Bridge, <a href="${SF_CREATE}" target="_blank" rel="noopener">create a setup token</a> and copy it.</li>
-      <li>Paste it here. Each token works once.</li></ol>
+      <li>Paste it here.${ib("Each token works once. The key SimpleFIN sends back is kept on this device only: not in your account or backups. It can read balances and transactions but can't move money.")}</li></ol>
       <textarea class="finput" id="sfToken" placeholder="Paste setup token" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-top:10px"></textarea>
-      <button class="primary" id="sfConnect" ${state.bankBusy || state.readOnly ? "disabled" : ""}>${state.bankBusy ? "Connecting…" : "Connect this device"}</button>
-      <p class="fhelp">The key SimpleFIN sends back stays on this device only. It isn't saved to your account or your backups, and it can only read balances and transactions. It can't move money.</p></div>`;
+      <button class="primary" id="sfConnect" ${state.bankBusy || state.readOnly ? "disabled" : ""}>${state.bankBusy ? "Connecting…" : "Connect this device"}</button></div>`;
   } else {
     h += `<div class="card"><div class="sum"><span>Last sync</span><b>${bk.lastSync ? esc(new Date(bk.lastSync).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})) : "Not yet"}</b></div>
       <div class="sum"><span>Importing from</span><b>${bk.from ? esc(shortDate(bk.from)) : "Not set"}</b></div>
-      <div class="sum"><span>Syncs in the last 24 hours</span><b>${sfLog().length} of ${SF_DAILY}</b></div>
-      <button class="primary" id="sfSync" ${state.bankBusy || !anyLink || state.readOnly ? "disabled" : ""}>${state.bankBusy ? "Syncing…" : "Sync now"}</button>
-      <p class="fhelp">Syncs by itself when you open the app, at most every 4 hours. Banks update SimpleFIN about once a day, so new purchases can take a day to show up. Linked accounts take the bank's balance on every sync.</p></div>`;
+      <button class="primary" id="sfSync" ${state.bankBusy || !anyLink || state.readOnly ? "disabled" : ""}>${state.bankBusy ? "Syncing…" : "Sync now"}</button></div>`;
   }
   if (names.length){
     const linking = state.bankLinking || !anyLink, opts = c.accounts.filter(a=>a.type!=="reimb");
-    h += `<h2>Bank accounts ${linking || state.readOnly ? "" : `<button class="sharebtn" id="sfEditLinks">Change</button>`}</h2>`;
+    h += `<h2>${h2t("Bank accounts", "Match each bank account to the account it is in this app. Matched accounts always show the bank's balance. \"Don't use\" skips one.")} ${linking || state.readOnly ? "" : `<button class="sharebtn" id="sfEditLinks">Change</button>`}</h2>`;
     if (linking){
-      h += `<p class="settext">Match each bank account to the account it is in this app. "Don't use" skips it.</p><div class="list">` + names.map(([id,n]) => `<div class="lnkrow"><div class="grow"><div class="t">${esc(n.name)}</div><div class="m">${esc(n.org)}${n.org ? " • " : ""}${money(n.bal)}</div></div>
+      h += `<div class="list">` + names.map(([id,n]) => `<div class="lnkrow"><div class="grow"><div class="t">${esc(n.name)}</div><div class="m">${esc(n.org)}${n.org ? " • " : ""}${money(n.bal)}</div></div>
         <select data-link="${esc(id)}" aria-label="Use ${esc(n.name)} as"><option value="">Don't use</option>${opts.map(a => `<option value="${esc(a.id)}" ${bk.links[id] === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></div>`).join("") + `</div>`;
       if (!opts.length) h += `<p class="hint">You don't have any accounts in the app yet. Set them up on Accounts first.</p>`;
-      h += `<label class="flabel" for="sfFrom">Bring in transactions from</label><input class="finput" type="date" id="sfFrom" value="${esc(bk.from || todayStr())}" max="${todayStr()}" min="${dateStr(Date.now() - 89*DAY_MS)}">
-        <div class="fhelp">Anything before this date stays out, so purchases you already entered by hand don't come in twice. Up to 89 days back.</div>
+      h += `<div class="flrow"><label class="flabel" for="sfFrom">Bring in transactions from</label>${ib("Anything before this date stays out, so purchases you already entered by hand don't come in twice. Up to 89 days back.")}</div><input class="finput" type="date" id="sfFrom" value="${esc(bk.from || todayStr())}" max="${todayStr()}" min="${dateStr(Date.now() - 89*DAY_MS)}">
         <div class="btnrow">${anyLink ? `<button class="small-ghost" id="sfCancelLinks">Cancel</button>` : ""}<button class="small-primary" id="sfSaveLinks" ${state.readOnly ? "disabled" : ""}>Save${key ? " and sync" : ""}</button></div>`;
     } else {
       h += `<div class="list">` + names.map(([id,n]) => { const a = accts[bk.links[id]]; return `<div class="row"><div class="grow"><div class="t">${esc(n.name)}</div><div class="m">${esc(n.org)}${n.org ? " • " : ""}${a ? "→ " + esc(a.name) : "Not used"}</div></div><span class="v">${money(n.bal)}</span></div>`; }).join("") + `</div>`;
@@ -2221,16 +2240,15 @@ function renderBank(){
   const learned = Object.entries(bk.rules);
   if (learned.length){
     const tot = k => Object.values(bk.tally[k] || {}).reduce((a, n) => a + n, 0) || 1;
-    h += `<h2>Learned stores <small><button class="sharebtn" id="lsToggle">${state.lsOpen ? "Hide" : "Show " + learned.length}</button></small></h2>`;
-    if (state.lsOpen) h += `<p class="settext">What Review suggests for each store, based on what you've picked most often. Tap one to change it or forget it.</p><div class="list">` +
+    h += `<h2>${h2t("Learned stores", "What Review suggests for each store, based on what you've picked most often. Tap one to change it or forget it.")} <small><button class="sharebtn" id="lsToggle">${state.lsOpen ? "Hide" : "Show " + learned.length}</button></small></h2>`;
+    if (state.lsOpen) h += `<div class="list">` +
       learned.sort((a, b) => tot(b[0]) - tot(a[0]) || a[0].localeCompare(b[0])).map(([k, v]) => { const n = tot(k), hit = (bk.tally[k] || {})[v] || 1, L = choiceLabel(c, v);
         return `<button class="row" data-ls="${esc(k)}" ${state.readOnly ? "disabled" : ""}><span class="ebub emoji">${esc(L[0])}</span><div class="grow"><div class="t">${esc(k.replace(/\b\w/g, ch => ch.toUpperCase()))}</div><div class="m">${esc(L[1])}${n > 1 ? ` • ${hit} of ${n} times` : ""}</div></div></button>`; }).join("") + `</div>`;
   }
   if (key) h += `<div class="list" style="margin-top:22px">
-      <button class="row" id="sfRefresh" ${state.bankBusy ? "disabled" : ""}><div class="grow"><div class="t">Refresh account list</div><div class="m">After adding a bank on the SimpleFIN Bridge.</div></div></button>
-      <button class="row" id="sfDisconnect"><div class="grow"><div class="t" style="color:var(--warn)">${state.sfConfirm ? "Tap again to disconnect" : "Disconnect this device"}</div><div class="m">Deletes the key from this device. Imported transactions stay. To shut off access everywhere, also delete this app's access on the SimpleFIN Bridge.</div></div></button></div>`;
-  h += `<div style="height:28px"></div>`;
-  $("bankBody").innerHTML = h;
+      <button class="row" id="sfRefresh" ${state.bankBusy ? "disabled" : ""}><div class="grow"><div class="t">Refresh account list</div></div></button>
+      <button class="row" id="sfDisconnect"><div class="grow"><div class="t" style="color:var(--warn)">${state.sfConfirm ? "Tap again to disconnect" : "Disconnect this device"}</div><div class="m">Removes the key from this device</div></div></button></div>`;
+  return h;
 }
 function choiceLabel(c, v){
   if (v === "@work") return ["🧾", "Work"];
@@ -2244,8 +2262,7 @@ function learnedForm(key){
   const opts = c.categories.map(k => [k.id, k.emoji + " " + k.name]).concat([["@work","🧾 Work"],["@skip","↔️ Transfer / not spending"],["@bill","📅 Bill"]], c.accounts.filter(a => DEBT.has(a.type)).map(a => ["@pay:" + a.id, "💸 Paid " + a.name]));
   openForm({
     title: key.replace(/\b\w/g, ch => ch.toUpperCase()),
-    fields:[{k:"v", type:"select", label:"Suggest", options:opts, value:cur}],
-    extra:`<div class="fhelp">Changes the suggestion for new items from this store. Things already filed stay as they are.</div>`,
+    fields:[{k:"v", type:"select", label:"Suggest", options:opts, value:cur, help:"Changes the suggestion for new items from this store. Things already filed stay as they are."}],
     saveLabel:"Save",
     onSave: v => { editCfg(y => { const n = Object.values(y.bank.tally[key] || {}).reduce((a, x) => a + x, 0) || 1; y.bank.rules[key] = v.v; y.bank.tally[key] = {[v.v]: n}; }); toast("Saved."); },
     deleteLabel:"Forget this store",
@@ -2263,26 +2280,28 @@ $("bankBody").addEventListener("touchstart", e => { rvSw = e.touches.length === 
 $("bankBody").addEventListener("touchend", e => { if (!rvSw) return; const t = e.changedTouches[0], dx = t.clientX - rvSw.x, dy = t.clientY - rvSw.y; rvSw = null;
   if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) rvGo(dx < 0 ? 1 : -1); });
 document.addEventListener("keydown", e => { if (state.view !== "bank" || /input|textarea|select/i.test((e.target||{}).tagName||"")) return; if (e.key === "ArrowRight") rvGo(1); if (e.key === "ArrowLeft") rvGo(-1); });
-$("bankBody").addEventListener("click", async e => {
+const renderBankUI = () => { if (state.view === "bank") renderBank(); if (state.view === "settings") renderSettings(); };
+async function bankClick(e){
+  const gt = e.target.closest("[data-goto]"); if (gt && e.currentTarget === $("bankBody")) return go(gt.dataset.goto);
   const pk = e.target.closest("[data-pick]");
-  const mb = e.target.closest("[data-menu]"); if (mb){ state.rvMenu = state.rvMenu === mb.dataset.menu ? null : mb.dataset.menu; return renderBank(); }
+  const mb = e.target.closest("[data-menu]"); if (mb){ state.rvMenu = state.rvMenu === mb.dataset.menu ? null : mb.dataset.menu; return renderBankUI(); }
   if (pk){ state.rvMenu = null; const card = pk.closest("[data-rv]"), b = state.bankNew.find(x=>x.id===card.dataset.rv); if (b){ card.classList.add("busy"); bankResolve(b, pk.dataset.pick); } return; }
   const id = (e.target.closest("button")||{}).id;
   if (id !== "sfDisconnect" && state.sfConfirm){ state.sfConfirm = false; }
   if (id === "sfConnect"){ const v = $("sfToken").value.trim(); if (!v) return toast("Paste the setup token first."); return bankConnect(v); }
   if (id === "sfSync") return bankSync(true);
   if (id === "rvPrev" || id === "rvNext") return rvGo(id === "rvNext" ? 1 : -1);
-  if (id === "lsToggle"){ state.lsOpen = !state.lsOpen; return renderBank(); }
+  if (id === "lsToggle"){ state.lsOpen = !state.lsOpen; return renderBankUI(); }
   const ls = e.target.closest("[data-ls]"); if (ls) return learnedForm(ls.dataset.ls);
   if (id === "sfBulk"){
     const todo = (state.bankPlan||[]).filter(x => x.ch[0] && x.ch[0].sug && state.bankNew.some(n => n.id === x.b.id));
     todo.forEach(x => bankResolve(x.b, x.ch[0].v, true));
     return toast(`Filed ${todo.length}. If one looks wrong, tap it in Activity to change it.`);
   }
-  if (id === "sfEditLinks"){ state.bankLinking = true; return renderBank(); }
-  if (id === "sfCancelLinks"){ state.bankLinking = false; return renderBank(); }
+  if (id === "sfEditLinks"){ state.bankLinking = true; return renderBankUI(); }
+  if (id === "sfCancelLinks"){ state.bankLinking = false; return renderBankUI(); }
   if (id === "sfSaveLinks"){
-    const links = {}; $("bankBody").querySelectorAll("[data-link]").forEach(s => { links[s.dataset.link] = s.value; });
+    const links = {}; document.querySelectorAll("[data-link]").forEach(s => { links[s.dataset.link] = s.value; });
     const from = $("sfFrom").value || todayStr();
     if (localMidnight(from) < localMidnight(dateStr(Date.now() - 89*DAY_MS))) return toast("SimpleFIN only goes back about 90 days. Pick a later date.");
     if (!Object.values(links).some(Boolean)) return toast("Match at least one bank account, or set them all to Don't use and disconnect.");
@@ -2291,14 +2310,14 @@ $("bankBody").addEventListener("click", async e => {
       c.bank.links = links; c.bank.from = from;
       if (changed) c.bank.lastSync = 0;  // pull the whole window again; ids already imported are skipped
     });
-    state.bankLinking = false; renderBank();
+    state.bankLinking = false; renderBankUI();
     if (sfKey()) return bankSync(true);
     return toast("Saved.");
   }
   if (id === "sfRefresh"){
     if (state.bankBusy) return;
     if (sfLog().length >= SF_DAILY) return toast("Synced a lot today already. Try again later.");
-    state.bankBusy = true; renderBank();
+    state.bankBusy = true; renderBankUI();
     try{ const {accounts, errors} = await sfAccounts({"balances-only":"1"}); editCfg(c => accounts.forEach(a => { c.bank.names[a.id] = bankName(a.id, a); })); state.bankErr = errors;
       const nw = accounts.filter(a => !(a.id in cfg().bank.links)).length; if (nw) state.bankLinking = true;
       toast(nw ? `${nw} new account${nw===1?"":"s"} found. Match ${nw===1?"it":"them"} below.` : "Account list is up to date."); }
@@ -2307,32 +2326,38 @@ $("bankBody").addEventListener("click", async e => {
     return;
   }
   if (id === "sfDisconnect"){
-    if (!state.sfConfirm){ state.sfConfirm = true; return renderBank(); }
-    state.sfConfirm = false; sfSave(null); state.bankErr = []; renderBank(); toast("Disconnected. The key is gone from this device.");
+    if (!state.sfConfirm){ state.sfConfirm = true; return renderBankUI(); }
+    state.sfConfirm = false; sfSave(null); state.bankErr = []; renderBankUI(); toast("Disconnected. The key is gone from this device.");
   }
-});
+}
+$("bankBody").addEventListener("click", bankClick);
+$("settingsBody").addEventListener("click", bankClick);
 
 /* ---------------- generic form sheet ---------------- */
 let formSpec = null;
+function flab(fd, forId){
+  const lbl = forId ? `<label class="flabel" for="${forId}">${esc(fd.label)}</label>` : `<div class="flabel">${esc(fd.label)}</div>`;
+  return fd.help ? `<div class="flrow">${lbl}${ib(fd.help)}</div>` : lbl;
+}
 function openForm(spec){
   formSpec = spec;
   const f = $("sheetForm");
   f.innerHTML = `<div class="sheethead"><h3 id="sheetTitle">${esc(spec.title)}</h3><button type="button" class="x" data-close aria-label="Close">✕</button></div>` +
     spec.fields.map(fd => {
       const id = "f_" + fd.k;
-      if (fd.type === "catpick") return `<div class="flabel">${esc(fd.label)}</div><div class="catpick" role="radiogroup" aria-label="${esc(fd.label)}" data-field="${fd.k}">` +
+      if (fd.type === "catpick") return `${flab(fd)}<div class="catpick" role="radiogroup" aria-label="${esc(fd.label)}" data-field="${fd.k}">` +
         fd.options.map(([v,em,n]) => `<button type="button" role="radio" aria-checked="${v===fd.value}" data-e="${esc(v)}"><span class="emoji">${esc(em)}</span><span>${esc(n)}</span></button>`).join("") + `</div>`;
-      if (fd.type === "select") return `<label class="flabel" for="${id}">${esc(fd.label)}</label><select class="finput" id="${id}" data-field="${fd.k}">` + fd.options.map(([v,n]) => `<option value="${esc(v)}" ${v===fd.value?"selected":""}>${esc(n)}</option>`).join("") + `</select>`;
-      if (fd.type === "color") return `<div class="flabel">${esc(fd.label)}</div><div class="epick cpick" role="radiogroup" aria-label="${esc(fd.label)}" data-field="${fd.k}">` +
+      if (fd.type === "select") return `${flab(fd, id)}<select class="finput" id="${id}" data-field="${fd.k}">` + fd.options.map(([v,n]) => `<option value="${esc(v)}" ${v===fd.value?"selected":""}>${esc(n)}</option>`).join("") + `</select>`;
+      if (fd.type === "color") return `${flab(fd)}<div class="epick cpick" role="radiogroup" aria-label="${esc(fd.label)}" data-field="${fd.k}">` +
         fd.options.map(e => `<button type="button" role="radio" aria-checked="${e===fd.value}" data-e="${esc(e)}" style="background:${esc(e)}" aria-label="Color ${esc(e)}"></button>`).join("") + `</div>`;
-      if (fd.type === "emoji") return `<div class="flabel">${esc(fd.label)}</div><div class="epick" role="radiogroup" aria-label="${esc(fd.label)}" data-field="${fd.k}">` +
+      if (fd.type === "emoji") return `${flab(fd)}<div class="epick" role="radiogroup" aria-label="${esc(fd.label)}" data-field="${fd.k}">` +
         Array.from(new Set([fd.value].concat(fd.options))).map(e => `<button type="button" class="emoji" role="radio" aria-checked="${e===fd.value}" data-e="${esc(e)}">${esc(e)}</button>`).join("") + `</div>`;
-      if (fd.type === "seg") return `<div class="flabel">${esc(fd.label)}</div><div class="seg" role="radiogroup" data-field="${fd.k}">` +
+      if (fd.type === "seg") return `${flab(fd)}<div class="seg${fd.options.length > 3 ? " many" : ""}" role="radiogroup" data-field="${fd.k}">` +
         fd.options.map(([v,n]) => `<button type="button" role="radio" aria-checked="${v===fd.value}" data-v="${esc(v)}">${esc(n)}</button>`).join("") + `</div>`;
-      if (fd.type === "money") return `<label class="flabel" for="${id}">${esc(fd.label)}</label><input class="finput" id="${id}" data-field="${fd.k}" inputmode="decimal" value="${fd.value ? (fd.value/100).toFixed(2) : ""}" placeholder="0.00">${fd.help ? `<div class="fhelp">${esc(fd.help)}</div>` : ""}`;
-      if (fd.type === "date") return `<label class="flabel" for="${id}">${esc(fd.label)}</label><input class="finput" id="${id}" data-field="${fd.k}" type="date" value="${esc(fd.value||"")}">${fd.help ? `<div class="fhelp">${esc(fd.help)}</div>` : ""}`;
-      if (fd.type === "day") return `<label class="flabel" for="${id}">${esc(fd.label)}</label><input class="finput" id="${id}" data-field="${fd.k}" inputmode="numeric" value="${fd.value||""}" placeholder="1 to 31">`;
-      return `<label class="flabel" for="${id}">${esc(fd.label)}</label><input class="finput" id="${id}" data-field="${fd.k}" value="${esc(fd.value)}" placeholder="${esc(fd.placeholder||"")}" maxlength="32" autocomplete="off">`;
+      if (fd.type === "money") return `${flab(fd, id)}<input class="finput" id="${id}" data-field="${fd.k}" inputmode="decimal" value="${fd.value ? (fd.value/100).toFixed(2) : ""}" placeholder="0.00">`;
+      if (fd.type === "date") return `${flab(fd, id)}<input class="finput" id="${id}" data-field="${fd.k}" type="date" value="${esc(fd.value||"")}">`;
+      if (fd.type === "day") return `${flab(fd, id)}<input class="finput" id="${id}" data-field="${fd.k}" inputmode="numeric" value="${fd.value||""}" placeholder="1 to 31">`;
+      return `${flab(fd, id)}<input class="finput" id="${id}" data-field="${fd.k}" value="${esc(fd.value)}" placeholder="${esc(fd.placeholder||"")}" maxlength="32" autocomplete="off">`;
     }).join("") + (spec.extra || "") +
     `<button class="primary" type="submit" style="margin-top:20px">${esc(spec.saveLabel)}</button>` +
     (spec.onDelete ? `<button class="danger" type="button" data-delete>${esc(spec.deleteLabel || "Delete")}</button>` : "");
@@ -2371,6 +2396,23 @@ $("sheetForm").addEventListener("submit", e => {
   $("sheet").close();
 });
 $("sheet").addEventListener("click", e => { if (e.target === $("sheet")) $("sheet").close(); });
+
+/* ---------------- info popover ---------------- */
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-info]");
+  let pop = $("infoPop");
+  if (!b){ if (pop && !e.target.closest("#infoPop")) pop.hidden = true; return; }
+  e.preventDefault(); e.stopPropagation();
+  if (!pop){ pop = document.createElement("div"); pop.id = "infoPop"; pop.setAttribute("role","status"); }
+  if (!pop.hidden && pop._for === b){ pop.hidden = true; return; }
+  (b.closest("dialog") || document.body).appendChild(pop);   // inside an open sheet, or it would sit behind it
+  pop._for = b; pop.textContent = b.dataset.info; pop.hidden = false;
+  const r = b.getBoundingClientRect(), w = Math.min(300, innerWidth - 24);
+  pop.style.width = w + "px"; pop.style.left = Math.max(12, Math.min(r.left + r.width/2 - w/2, innerWidth - w - 12)) + "px";
+  const below = r.bottom + 8, hgt = pop.offsetHeight;
+  pop.style.top = (below + hgt > innerHeight - 12 ? Math.max(12, r.top - hgt - 8) : below) + "px";
+}, true);
+window.addEventListener("scroll", () => { const p = $("infoPop"); if (p) p.hidden = true; }, {passive:true});
 
 /* ---------------- misc ---------------- */
 let tt;
