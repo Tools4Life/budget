@@ -386,6 +386,23 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 .estline .linkbtn{padding:4px 2px;font-size:.88rem}
 #homeBody .hright>.estline:first-child{margin-top:0}
 #accountsBody .row .m{white-space:normal}
+.rv.one{padding:20px 16px 14px;text-align:center}
+.rvamt{font-size:2.5rem;font-weight:800;letter-spacing:-.03em;line-height:1.05}
+.rvamt.in{color:var(--good)}
+.rvname{font-weight:700;font-size:1.15rem;margin-top:6px;overflow-wrap:anywhere}
+.rvmeta{color:var(--muted);font-size:.88rem;margin-top:2px}
+.rvraw{color:var(--muted);font-size:.72rem;margin-top:6px;font-family:ui-monospace,Menlo,monospace;overflow-wrap:anywhere;opacity:.8}
+.rv.one .match{margin-top:8px}
+.rv.one .flabel{text-align:left;margin:16px 2px 8px}
+.rvsug{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:16px}
+.rvsug .emoji{font-size:1.35rem}
+.rvacts{display:flex;flex-wrap:wrap;gap:8px}
+.rvacts button{display:flex;align-items:center;gap:7px;border:1.5px solid var(--line);background:var(--bg);border-radius:999px;padding:8px 13px;font-weight:600;font-size:.88rem}
+.rvacts .emoji{font-size:1.05rem}
+.rvcats{grid-template-columns:repeat(3,1fr)}
+@media (min-width:480px){.rvcats{grid-template-columns:repeat(4,1fr)}}
+.rvnav{margin-top:16px}
+.rvnav button:disabled{opacity:.35}
 .rv{border:1.5px solid var(--line);border-radius:20px;padding:12px 14px 10px;margin-top:10px;background:var(--bg)}
 .rv .top{display:flex;align-items:center;gap:12px}
 .rv .v.in{color:var(--good)}
@@ -609,7 +626,9 @@ function normalize(c){
    links: SimpleFIN account id -> app account id ("" = ignore). names: last seen bank account info. rules: merchant -> category id, "@work" or "@skip". */
 function normBank(b){
   b = b || {};
-  return {from: b.from || "", links: Object.assign({}, b.links), names: Object.assign({}, b.names), rules: Object.assign({}, b.rules), lastSync: b.lastSync || 0};
+  const rules = Object.assign({}, b.rules);
+  ["authorized on","authorized","purchase authorized","return authorized","on"].forEach(k => delete rules[k]);  // learned from bank boilerplate before cleanDesc existed
+  return {from: b.from || "", links: Object.assign({}, b.links), names: Object.assign({}, b.names), rules, lastSync: b.lastSync || 0};
 }
 
 const NOW = monthKey(new Date());
@@ -1828,8 +1847,26 @@ function bankId(acctId, txId){
   return "b" + (h1>>>0).toString(36) + (h2>>>0).toString(36);
 }
 /* "KROGER #123 SPARTANBURG SC" and "Kroger 456" both become "kroger spartanburg"/"kroger": first two words, no numbers or bank noise. */
-const merchKey = d => String(d||"").toLowerCase().replace(/[^a-z& ]+/g," ").replace(/\b(pos|purchase|debit|credit|card|recurring|payment|checkcard|ach|sq|tst|pp|www|com|the)\b/g," ").trim().split(/\s+/).filter(Boolean).slice(0,2).join(" ");
-const niceDesc = d => String(d||"").replace(/\s{2,}/g," ").trim().slice(0,60);
+/* Bank descriptions carry boilerplate: Wells Fargo prefixes every debit with "PURCHASE AUTHORIZED ON 11/03" and appends "S3863... CARD 1234";
+   processors add "TST*", "SQ *", "SP+". Strip it so names read cleanly and stores are learned by their real name. */
+function cleanDesc(d){
+  const x = String(d||"")
+    .replace(/^(recurring\s+)?(purchase|payment)\s+(return\s+)?authorized\s+on\s+\d{1,2}\/\d{1,2}\s*/i,"")
+    .replace(/^(pos|debit card|checkcard|check card)(\s+purchase)?(\s+\d{4})?\s*-?\s*/i,"")
+    .replace(/\s+S\d{9,}\s+CARD\s+\d{4}\s*$/i,"").replace(/\s+CARD\s+\d{4}\s*$/i,"")
+    .replace(/^(TST\*|SQ\s?\*|SP\+|SP\s?\*|PY\s?\*|DD\s?\*|IC\*)\s*/i,"")
+    .replace(/\s{2,}/g," ").trim();
+  return x || String(d||"").trim();
+}
+/* "PURCHASE AUTHORIZED ON 11/03 ..." posts a day or two later; use the purchase date when the bank gives one. */
+function bankTs(b){
+  const m = /authorized\s+on\s+(\d{1,2})\/(\d{1,2})/i.exec(b.desc||""); if (!m) return b.ts;
+  const p = new Date(b.ts); let d = new Date(p.getFullYear(), +m[1]-1, +m[2], 12);
+  if (d - p > 2*DAY_MS) d = new Date(p.getFullYear()-1, +m[1]-1, +m[2], 12);
+  return p - d <= 10*DAY_MS && p - d >= -2*DAY_MS ? d.getTime() : b.ts;
+}
+const merchKey = d => cleanDesc(d).toLowerCase().replace(/[^a-z& ]+/g," ").replace(/\b(pos|purchase|debit|credit|card|recurring|payment|checkcard|ach|sq|tst|pp|www|com|the)\b/g," ").trim().split(/\s+/).filter(Boolean).slice(0,2).join(" ");
+const niceDesc = d => cleanDesc(d).slice(0,60);
 
 async function sfClaim(token){
   let claim = "";
@@ -1909,7 +1946,8 @@ async function bankSync(manual){
         const amt = -Math.round(parseFloat(t.amount)*100);  // SimpleFIN: negative = money out. App: positive = money out.
         if (!amt) return;
         const id = bankId(a.id, t.id); if (have.has(id)) return; have.add(id);
-        fresh.push({id, status:"new", bacct:a.id, acct:to, ts, amt, desc:String(t.description || t.payee || "Bank transaction").slice(0,90), month:monthKey(new Date(ts)), added:Date.now()});
+        const desc = String(t.description || t.payee || "Bank transaction").slice(0,120), ts2 = bankTs({desc, ts});
+        fresh.push({id, status:"new", bacct:a.id, acct:to, ts:ts2, amt, desc, month:monthKey(new Date(ts2)), added:Date.now()});
       });
     });
     await store.bankAdd(fresh);
@@ -1940,7 +1978,7 @@ function bankAuto(){
 function bankMatch(b, used){
   if (b.amt <= 0) return null;
   const pool = state.cur.tx.concat(state.viewTx || []);
-  return pool.find(t => !t.bank && !used.has(t.id) && t.amt === b.amt && (!t.acct || t.acct === b.acct) && Math.abs(t.ts - b.ts) <= 4*DAY_MS) || null;
+  return pool.find(t => !t.bank && !used.has(t.id) && t.amt === b.amt && (!t.acct || t.acct === b.acct) && Math.abs(t.ts - bankTs(b)) <= 4*DAY_MS) || null;
 }
 /* An unpaid bill this month that this bank payment looks like: bill name in the description and/or the exact amount. */
 function bankBill(c, b, usedBills){
@@ -1961,10 +1999,16 @@ function bankChoices(c, b, m, bill){
   const cats = c.categories.filter(k=>k.limit>0).concat(c.categories.filter(k=>!k.limit)).map(k => ({v:"c:"+k.id, e:k.emoji, n:k.name}));
   const work = {v:"work", e:"🧾", n:"Work", act:true}, skip = {v:"skip", e:"↔️", n:b.amt < 0 ? "Money in" : "Transfer", act:true};
   const billCh = bill ? [{v:"bill:"+bill.pid, e:"📅", n:bill.name, act:true}] : [];
-  let list = b.amt < 0 ? [skip].concat(cats) : billCh.concat(cats, [work, skip]);
+  // Paying a card or loan the bank feed doesn't cover (Affirm, Klarna...): lowers what you owe there.
+  const linked = new Set(Object.values(c.bank.links).filter(Boolean)), from = c.accounts.find(a=>a.id===b.acct);
+  const payable = b.amt > 0 && (!from || !DEBT.has(from.type)) ? c.accounts.filter(a => DEBT.has(a.type) && !linked.has(a.id)) : [];
+  const payCh = payable.map(a => ({v:"pay:"+a.id, e:"💸", n:"Paid " + a.name, act:true}));
+  const raw = String(b.desc||"").toLowerCase();
+  const payHit = payable.find(a => { const nm = a.name.toLowerCase(); return (/affirm/.test(nm) && /\baff\s?\*|affirm/.test(raw)) || nm.split(/[^a-z0-9]+/).some(w => w.length >= 4 && raw.includes(w)); });
+  let list = b.amt < 0 ? [skip].concat(cats) : billCh.concat(payCh, [skip, work], cats);
   // No rule yet: card payments and transfers look alike at every bank, so put Transfer first for them.
   const looksMove = /\b(payment|pmt|autopay|auto pay|epay|e-payment|transfer|xfer|thank you|zelle to|to savings|from savings)\b/i.test(b.desc);
-  const want = bill && (rule === "@bill" || !rule) ? "bill:"+bill.pid : rule === "@work" ? "work" : rule === "@skip" || rule === "@bill" ? "skip" : rule ? "c:"+rule : looksMove ? "skip" : "";
+  const want = bill && (rule === "@bill" || !rule) ? "bill:"+bill.pid : rule.startsWith("@pay:") && payable.some(a => "@pay:"+a.id === rule) ? rule.slice(1) : rule === "@work" ? "work" : rule === "@skip" || rule === "@bill" || rule.startsWith("@pay:") ? "skip" : rule ? "c:"+rule : payHit ? "pay:"+payHit.id : looksMove ? "skip" : "";
   const i = list.findIndex(x => x.v === want);
   if (i > 0) list = [list[i]].concat(list.slice(0,i), list.slice(i+1));
   if (i >= 0) list[0] = Object.assign({}, list[0], {sug:true});
@@ -1974,7 +2018,18 @@ function bankChoices(c, b, m, bill){
 function bankResolve(b, choice, quiet){
   if (state.readOnly) return toast("View only.");
   if (quiet){ const t0 = toast; toast = () => {}; try{ return bankResolve(b, choice); } finally{ toast = t0; } }
-  const c = cfg(), key = merchKey(b.desc);
+  const c = cfg(), key = merchKey(b.desc), linked = new Set(Object.values(c.bank.links).filter(Boolean));
+  if (choice.startsWith("pay:")){
+    const to = choice.slice(4), ta = c.accounts.find(a=>a.id===to); if (!ta) return;
+    editCfg(y => {
+      if (!linked.has(to)) moveBal(y, to, -b.amt);   // the checking side is already in the bank balance
+      y.payments = [{id:b.id, ts:bankTs(b), from:b.acct, to, plan:"", planName:"", payoff:false, prevEnd:"", amt:b.amt, note:"From bank", budget:false, bank:b.id}].concat(y.payments||[]).slice(0,60);
+      if (key) y.bank.rules[key] = "@pay:" + to;
+    });
+    store.bankSet(b, {status:"pay", to, done:Date.now()});
+    toast(`${money(b.amt)} paid to ${ta.name}. ${ta.name} now ${money(balOf(cfg(), to))}. Not counted as spending.`);
+    return;
+  }
   if (choice.startsWith("bill:")){
     // The bank balance already reflects this payment, so mark the bill paid WITHOUT moving any balance, and record the real amount.
     const pid = choice.slice(5), x = insts(c).find(i => i.pid === pid);
@@ -1984,7 +2039,8 @@ function bankResolve(b, choice, quiet){
       if (x.varies || b.amt !== x.amount) map.__amt = Object.assign({}, map.__amt, {[pid]: b.amt});
       store.setPaid(map);
     }
-    editCfg(y => { if (key) y.bank.rules[key] = "@bill"; });
+    // A bill that pays down a card or loan the bank feed doesn't cover (an Affirm plan, say): lower what you owe there.
+    editCfg(y => { if (key) y.bank.rules[key] = "@bill"; if (x && x.cardOf && x.cardOf !== b.acct && !linked.has(x.cardOf)) moveBal(y, x.cardOf, -b.amt); });
     store.bankSet(b, {status:"bill", bill:pid, done:Date.now()});
     toast(x ? `${x.name} marked paid${x.varies ? " at " + money(b.amt) : ""}. Your allowance isn't touched.` : "Filed as a bill.");
     return;
@@ -1999,7 +2055,7 @@ function bankResolve(b, choice, quiet){
   const work = choice === "work";
   const k = work ? (c.categories.find(x=>x.id==="other") || c.categories[0]) : c.categories.find(x => "c:"+x.id === choice);
   if (!k) return;
-  const t = {id:b.id, amt:b.amt, cat:k.id, catName:k.name, note:niceDesc(b.desc), acct:c.accounts.find(a=>a.id===b.acct) ? b.acct : "", ts:b.ts, month:monthKey(new Date(b.ts)), work, bank:b.id};
+  const t = {id:b.id, amt:b.amt, cat:k.id, catName:k.name, note:niceDesc(b.desc), acct:c.accounts.find(a=>a.id===b.acct) ? b.acct : "", ts:bankTs(b), month:monthKey(new Date(bankTs(b))), work, bank:b.id};
   let after = null;
   editCfg(x => { if (work) applyTx(x, t, 1); if (key) x.bank.rules[key] = work ? "@work" : k.id; after = x; });
   if (t.month === NOW) store.addTx(t); else store.addOther(t);
@@ -2048,18 +2104,29 @@ function renderBank(){
     const plan = items.map(b => { const m = bankMatch(b, used); if (m) used.add(m.id); const bl = m ? null : bankBill(c, b, usedBills); if (bl) usedBills.add(bl.pid); return {b, m, ch:bankChoices(c, b, m, bl)}; });
     state.bankPlan = plan;
     const sugN = plan.filter(x => x.ch[0] && x.ch[0].sug).length;
-    h += `<h2 style="margin-top:4px">From your bank <small>${items.length ? items.length + " left" : ""}</small></h2>`;
+    h += `<h2 style="margin-top:4px">From your bank <small>${items.length ? Math.min((state.rvIdx||0) + 1, items.length) + " of " + items.length : ""}</small></h2>`;
     if (!items.length) h += `<div class="list"><div class="empty">All caught up. New bank transactions show up here after each sync.</div></div>`;
     if (sugN >= 2 && !state.readOnly) h += `<button class="ghost" id="sfBulk" style="border-style:solid;margin:0 0 4px">File ${sugN} highlighted picks</button>`;
-    plan.forEach(({b, m, ch}) => {
-      const a = accts[b.acct], mk = m && c.categories.find(k=>k.id===m.cat);
-      h += `<div class="rv" data-rv="${esc(b.id)}"><div class="top">${a ? acctTile(a) : `<span class="itile">?</span>`}
-        <div class="grow"><div class="t">${esc(niceDesc(b.desc))}</div><div class="m">${esc(new Date(b.ts).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}))}${a ? ` • <span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""}</div></div>
-        <span class="v ${b.amt < 0 ? "in" : ""}">${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</span></div>
+    if (plan.length){
+      const n = plan.length, idx = state.rvIdx = Math.max(0, Math.min(state.rvIdx || 0, n - 1));
+      const {b, m, ch} = plan[idx], a = accts[b.acct], mk = m && c.categories.find(k=>k.id===m.cat), when = bankTs(b);
+      const sug = ch.find(x => x.sug), others = ch.filter(x => x !== sug), acts = others.filter(x => !x.v.startsWith("c:")), cats = others.filter(x => x.v.startsWith("c:"));
+      const dis = state.readOnly ? "disabled" : "";
+      const name = cleanDesc(b.desc), showRaw = name.toLowerCase() !== String(b.desc).replace(/\s{2,}/g," ").trim().toLowerCase();
+      h += `<div class="rv one" data-rv="${esc(b.id)}">
+        <div class="rvamt ${b.amt < 0 ? "in" : ""}">${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</div>
+        <div class="rvname">${esc(name)}</div>
+        <div class="rvmeta">${esc(new Date(when).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}))}${a ? ` • <span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""}</div>
+        ${showRaw ? `<div class="rvraw">${esc(b.desc)}</div>` : ""}
         ${m ? `<div class="match">Looks like your ${esc(m.note || (mk ? mk.name : "entry"))} entry from ${esc(new Date(m.ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}.</div>` : ""}
-        <div class="chips">${ch.map(ch => `<button class="chip${ch.sug ? " sug" : ""}${ch.act ? " act" : ""}" data-pick="${esc(ch.v)}" ${state.readOnly ? "disabled" : ""}><span class="bub emoji">${esc(ch.e)}</span><span class="nm">${esc(ch.n)}</span></button>`).join("")}</div></div>`;
-    });
-    if (items.length) h += `<p class="hint">One tap files it. 📅 marks that bill paid on Bills. Paying a card from checking shows up twice, once on each account: tap Transfer on both. Horizon purchases: tap Work. Highlighted picks come from what you chose last time.</p>`;
+        ${sug ? `<button class="primary rvsug" data-pick="${esc(sug.v)}" ${dis}><span class="emoji">${esc(sug.e)}</span> ${esc(sug.v.startsWith("c:") ? "File as " + sug.n : sug.n)}</button>` : ""}
+        ${acts.length ? `<div class="flabel">Not from your allowance</div><div class="rvacts">${acts.map(x => `<button data-pick="${esc(x.v)}" ${dis}><span class="emoji">${esc(x.e)}</span>${esc(x.n)}</button>`).join("")}</div>` : ""}
+        <div class="flabel">${sug && sug.v.startsWith("c:") ? "Other category" : "Category"}</div>
+        <div class="catpick rvcats">${cats.map(x => `<button type="button" data-pick="${esc(x.v)}" ${dis}><span class="emoji">${esc(x.e)}</span><span>${esc(x.n)}</span></button>`).join("")}</div>
+        <div class="btnrow rvnav"><button class="small-ghost" id="rvPrev" ${idx === 0 ? "disabled" : ""}>‹ Back</button><button class="small-ghost" id="rvNext" ${idx >= n - 1 ? "disabled" : ""}>Skip for now ›</button></div>
+      </div>
+      <p class="hint">Swipe or use Back and Skip to move between items. Filing one shows the next. Paying a card from checking shows up on both accounts: file both as Transfer. Anything filed wrong can be changed in Activity.</p>`;
+    }
   }
   h += `<h2>${key ? "Bank connection" : "Connect your banks"}</h2>`;
   if (!key){
@@ -2098,6 +2165,17 @@ function renderBank(){
   h += `<div style="height:28px"></div>`;
   $("bankBody").innerHTML = h;
 }
+function rvGo(d){
+  const n = state.bankNew.length; if (!n) return;
+  const ni = Math.max(0, Math.min((state.rvIdx||0) + d, n - 1)); if (ni === state.rvIdx) return;
+  state.rvIdx = ni; renderBank();
+  const card = $("bankBody").querySelector(".rv.one"); if (card && card.getBoundingClientRect().top < 60) card.scrollIntoView({block:"start", behavior:"smooth"});
+}
+let rvSw = null;
+$("bankBody").addEventListener("touchstart", e => { rvSw = e.touches.length === 1 && e.target.closest(".rv.one") ? {x:e.touches[0].clientX, y:e.touches[0].clientY} : null; }, {passive:true});
+$("bankBody").addEventListener("touchend", e => { if (!rvSw) return; const t = e.changedTouches[0], dx = t.clientX - rvSw.x, dy = t.clientY - rvSw.y; rvSw = null;
+  if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) rvGo(dx < 0 ? 1 : -1); });
+document.addEventListener("keydown", e => { if (state.view !== "bank" || /input|textarea|select/i.test((e.target||{}).tagName||"")) return; if (e.key === "ArrowRight") rvGo(1); if (e.key === "ArrowLeft") rvGo(-1); });
 $("bankBody").addEventListener("click", async e => {
   const pk = e.target.closest("[data-pick]");
   if (pk){ const card = pk.closest("[data-rv]"), b = state.bankNew.find(x=>x.id===card.dataset.rv); if (b){ card.classList.add("busy"); bankResolve(b, pk.dataset.pick); } return; }
@@ -2105,6 +2183,7 @@ $("bankBody").addEventListener("click", async e => {
   if (id !== "sfDisconnect" && state.sfConfirm){ state.sfConfirm = false; }
   if (id === "sfConnect"){ const v = $("sfToken").value.trim(); if (!v) return toast("Paste the setup token first."); return bankConnect(v); }
   if (id === "sfSync") return bankSync(true);
+  if (id === "rvPrev" || id === "rvNext") return rvGo(id === "rvNext" ? 1 : -1);
   if (id === "sfBulk"){
     const todo = (state.bankPlan||[]).filter(x => x.ch[0] && x.ch[0].sug && state.bankNew.some(n => n.id === x.b.id));
     todo.forEach(x => bankResolve(x.b, x.ch[0].v, true));
