@@ -100,7 +100,7 @@ button{cursor:pointer}
 .ring .trk{stroke:var(--surface2)}
 .ring .val{stroke:var(--accent);transition:stroke-dashoffset .5s cubic-bezier(.2,.8,.2,1)}
 .ringcard.over .val{stroke:var(--warn)}
-.ringcard.fast{border-color:var(--amber);background:var(--amber-soft)}
+.ringcard.fast{border-color:var(--line);background:var(--bg)}
 .ringcard.fast .val{stroke:var(--amber)}
 .ringcard .pace{color:var(--amber);font-size:.78rem;font-weight:700;margin-top:-4px}
 .ring .ctr{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.05}
@@ -374,6 +374,18 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 /* bank sync (SimpleFIN) */
 .navbtn .nbadge{margin-left:auto;min-width:22px;height:22px;border-radius:11px;background:var(--accent);color:#fff;font-size:.75rem;font-weight:800;display:grid;place-items:center;padding:0 6px}
 .nbadge[hidden]{display:none}
+.itile{width:42px;height:42px;border-radius:14px;background:var(--surface);color:var(--muted);display:grid;place-items:center;flex:none;font-weight:800;font-size:.86rem;letter-spacing:.02em}
+.dtile{width:42px;height:42px;border-radius:12px;flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--surface);line-height:1}
+.dtile small{font-size:.6rem;font-weight:800;text-transform:uppercase;color:var(--muted);letter-spacing:.06em}
+.dtile b{font-size:1.1rem;font-weight:800;margin-top:2px}
+.dtile.late small,.dtile.late b{color:var(--warn)}
+#homeBody .upnext .dtile,#homeBody .upnext .itile{width:36px;height:36px;border-radius:11px}
+#homeBody .deskonly .itile{width:38px;height:38px}
+.estline{display:flex;align-items:center;gap:12px;background:var(--surface);border-radius:14px;padding:10px 14px;margin-top:18px;font-size:.88rem;color:var(--muted)}
+.estline span{flex:1}.estline b{color:var(--ink)}
+.estline .linkbtn{padding:4px 2px;font-size:.88rem}
+#homeBody .hright>.estline:first-child{margin-top:0}
+#accountsBody .row .m{white-space:normal}
 .rv{border:1.5px solid var(--line);border-radius:20px;padding:12px 14px 10px;margin-top:10px;background:var(--bg)}
 .rv .top{display:flex;align-items:center;gap:12px}
 .rv .v.in{color:var(--good)}
@@ -546,6 +558,9 @@ function insts(c, key){
 const CAT_EMOJI = ["🛒","🛍️","🍔","☕","⛽","🏠","🧸","👶","🎁","💊","🐶","👕","✂️","🎉","📚","🙏","🚗","✈️","🎮","💄","📦","🍕","🥡","🍩","🍺","🍼","🧒","🎓","🐾","🧹","🧺","🧴","🛠️","🪑","🌱","💻","📱","🎬","🎵","🎟️","🎨","🏋️","⚽","🏖️","🚕","🅿️","🔧","🏥","🦷","👓","💅","🎂","🎄","💝","⛪","🧾"];
 const BILL_EMOJI = ["💸","🏠","💡","💧","🔥","🗑️","📱","🌐","🚗","🛡️","💳","🛋️","🏥","👶","🎬","🎵","☁️","🏋️","📺","🍎","🧾"];
 const ACCT_COLORS = ["#1F5BFF","#12805C","#7A5AF8","#E8590C","#DD2590","#0E9384","#CA8504","#475467"];
+/* Colored initials for an account: "Amex Gold" -> AG, "WF Credit #1" -> WF, "Checking" -> C. */
+const acctInit = a => { const w = String(a.name||"?").replace(/[^A-Za-z0-9 ]/g," ").trim().split(/\s+/); return (/^[A-Z]{2,3}$/.test(w[0]) ? w[0] : w.slice(0,2).map(x=>x[0]).join("")).toUpperCase() || "?"; };
+const acctTile = a => `<span class="itile" style="background:${esc(acctColor(a))}1F;color:${esc(acctColor(a))}" aria-hidden="true">${esc(acctInit(a))}</span>`;
 const acctColor = a => a.color || ACCT_COLORS[Math.abs([...String(a.id)].reduce((h,ch)=>(h*31+ch.charCodeAt(0))|0,7)) % ACCT_COLORS.length];
 const ACCT_EMOJI = ["🏦","💳","💰","🐷","📈","🛋️","🧾","💵"];
 const ACCT_TYPES = [["checking","Checking"],["savings","Savings"],["credit","Credit card"],["loan","Loan or BNPL"],["reimb","Owed to me"]];
@@ -825,7 +840,7 @@ function renderHome(){
   if (!r.tracked.length) html += `<div class="list"><div class="empty">No budgets yet. In Planner, give any category a monthly amount and it shows up here as a ring.</div></div>`;
   else html += `<div class="rings strip">` + r.tracked.map(k => {
     const sp = r.spentBy[k.id]||0, rem = k.limit - sp, over = rem < 0;
-    const proj = elapsed >= 0.2 && sp > 0 ? Math.round(sp / elapsed) : 0, fast = !over && proj > k.limit * 1.15;
+    const proj = elapsed >= 0.4 && sp > 0 ? Math.round(sp / elapsed) : 0, fast = !over && proj > k.limit * 1.15;
     return `<button class="ringcard ${over?"over":fast?"fast":""}" data-quick="${esc(k.id)}" aria-label="${esc(k.name)}: ${over ? money(-rem)+" over" : money(rem)+" left"} of ${money(k.limit)}${fast ? ". Spending fast, on pace for "+money(proj) : ""}. Add a transaction">
       <div class="ring">${ringSvg(over ? 1 : sp/k.limit)}<div class="ctr"><b>${over ? "−"+whole(-rem) : whole(rem)}</b><small>${over ? "over" : "left"}</small></div><span class="rbadge emoji">${esc(k.emoji)}</span></div>
       <div class="nm">${esc(k.name)}</div>
@@ -843,7 +858,7 @@ function deskAccountsHtml(c){
   if (!list.length) return "";
   const lbl = a => DEBT.has(a.type) ? "owed" : a.type === "reimb" ? "owed to you" : "";
   return `<div class="deskonly"><h2>Accounts <small><button class="sharebtn" data-goto="accounts">Open</button></small></h2><div class="list">` + list.map(a =>
-    `<button class="row" data-goto="accounts"><span class="ebub emoji" style="box-shadow:inset 3px 0 0 ${esc(acctColor(a))}">${esc(a.emoji)}</span><div class="grow"><div class="t">${esc(a.name)}</div><div class="m">${a.updated ? "Updated " + new Date(a.updated).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : ""}</div></div><span class="v">${money(a.balance)}${lbl(a) ? ` <small style="color:var(--muted);font-weight:500">${lbl(a)}</small>` : ""}</span></button>`).join("") + `</div></div>`;
+    `<button class="row" data-goto="accounts">${acctTile(a)}<div class="grow"><div class="t">${esc(a.name)}</div><div class="m">${a.updated ? "Updated " + new Date(a.updated).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : ""}</div></div><span class="v">${money(a.balance)}${lbl(a) ? ` <small style="color:var(--muted);font-weight:500">${lbl(a)}</small>` : ""}</span></button>`).join("") + `</div></div>`;
 }
 function fitHome(){
   if (WIDE.matches){ const b = $("homeBody"); b.classList.remove("tight"); b.querySelectorAll(".row[data-due]").forEach(r => r.hidden = false); const m = b.querySelector("[data-more]"); if (m) m.remove(); return; }
@@ -880,15 +895,14 @@ function upNextHtml(c, mo){
   items.sort((a,b)=>a.sort-b.sort);
   const need = c.bills.filter(needsAmt);
   let h = "";
-  if (need.length) h += `<div class="nudge" style="flex-direction:column;align-items:stretch;gap:10px"><span><b>${need.length===1 ? esc(need[0].name) + "'s " + mo + " amount isn't in yet." : need.length + " bills don't have " + mo + "'s amount yet."}</b> Using ${need.length===1 ? "the typical " + whole(need[0].amount) : "their typical amounts"} for now.</span>
-    ${state.readOnly ? "" : `<div class="btnrow" style="margin-top:0"><button class="small-ghost" data-goto="bills" style="background:var(--bg)">Enter amount</button><button class="small-primary" data-keepest="${need.map(b=>esc(b.id)).join(",")}">That's fine for now</button></div>`}</div>`;
+  if (need.length) h += `<div class="estline"><span><b>${need.length===1 ? esc(need[0].name) : need.length + " bills"}</b> ${need.length===1 ? "using the typical " + whole(need[0].amount) : "using typical amounts"} until ${need.length===1 ? "the bill is" : "they're"} in.</span>${state.readOnly ? "" : `<button class="linkbtn" data-goto="bills">Enter</button><button class="linkbtn" data-keepest="${need.map(b=>esc(b.id)).join(",")}">OK</button>`}</div>`;
   if (!items.length) return h;
   const total = items.reduce((a,x)=>a+(x.next ? x.b.amount : billAmt(x.b)),0);
   h += `<h2>Due this week <small>${whole(total)}</small></h2><div class="list upnext" data-count="${items.length}">` + items.slice(0,6).map(x => {
     const dt = x.next ? new Date(keyToDate(shiftKey(NOW,1)).getFullYear(), keyToDate(shiftKey(NOW,1)).getMonth(), x.day) : new Date(keyToDate(NOW).getFullYear(), keyToDate(NOW).getMonth(), x.day);
-    const when = x.late ? "Past due date" : x.day === today && !x.next ? "Due today" : (x.next || x.day - today > 1 ? dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}) : "Tomorrow");
+    const when = x.late ? "Past due date" : x.day === today && !x.next ? "Due today" : (x.next || x.day - today > 1 ? dt.toLocaleDateString("en-US",{weekday:"long"}) + " • in " + Math.round((dt - new Date(new Date().setHours(0,0,0,0)))/86400000) + " days" : "Tomorrow");
     const est = x.next ? x.b.varies : isEst(x.b);
-    return `<div class="row" data-due><span class="ebub emoji">${esc(x.b.emoji)}</span>
+    return `<div class="row" data-due><span class="dtile ${x.late ? "late" : ""}"><small>${dt.toLocaleDateString("en-US",{month:"short"})}</small><b>${dt.getDate()}</b></span>
       <button class="grow" data-goto="bills" style="border:0;background:none;text-align:left;padding:0"><div class="t">${esc(x.b.name)}</div><div class="m ${x.late?"due-late":x.day-today<=1&&!x.next?"due-soon":""}">${when}</div></button>
       <span class="v">${est ? '<span class="est">est.</span>' : ""}${money(x.next ? x.b.amount : billAmt(x.b))}</span>
       ${x.next || state.readOnly ? "" : `<button class="check" data-hpaid="${esc(x.b.pid)}" role="checkbox" aria-checked="false" aria-label="Mark ${esc(x.b.name)} paid"></button>`}
@@ -1200,16 +1214,16 @@ function renderAccounts(){
     <div class="sum"><span>Horizon owes you</span><b>+${money(recv)}</b></div>
     <div class="sum total"><span>True position</span><b style="color:${cash+recv-debts<0?"var(--warn)":"var(--good)"}">${signed(cash+recv-debts)}</b></div></div>`;
   let html = "";
-  if (c.accounts.length && !state.readOnly) html += `<div class="btnrow"><button class="small-primary" id="logPay" style="flex:1">Money in</button><button class="small-primary" id="payExtra" style="flex:1" ${debtA.length?"":"disabled"}>Pay a card</button></div>`;
+  if (c.accounts.length && !state.readOnly) html += `<div class="btnrow"><button class="small-ghost" id="logPay" style="flex:1">Money in</button><button class="small-ghost" id="payExtra" style="flex:1" ${debtA.length?"":"disabled"}>Pay a card</button></div>`;
   const groups = [["Cash", cashA],["Owed to you", recvA],["Cards, loans, and BNPL", debtA]];
   groups.forEach(([title, arr]) => {
     if (!arr.length) return;
     html += `<h2>${title}</h2><div class="list">` + arr.map(a => {
       const tl = (ACCT_TYPES.find(x=>x[0]===a.type)||[,""])[1];
       const sp = spentByAcct[a.id] || 0;
-      const meta = a.type === "reimb" ? `Work expenses not yet repaid${workN ? " • " + workN + " logged this month" : ""}` : tl + (sp ? " • " + money(sp) + " charged this month" : "");
+      const meta = a.type === "reimb" ? (workN ? workN + " work expense" + (workN===1?"":"s") + " this month" : "Unpaid work expenses") : (sp ? money(sp) + " this month" : tl);
       return `<button class="row" data-acct="${esc(a.id)}" ${state.readOnly?"disabled":""}><span class="abar" style="background:${acctColor(a)}"></span>
-        <div class="grow"><div class="t">${esc(a.name)}</div><div class="m">${meta}${a.updated ? " • updated " + new Date(a.updated).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : ""}</div></div>
+        <div class="grow"><div class="t">${esc(a.name)}</div><div class="m">${meta}${a.updated ? " • " + new Date(a.updated).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : ""}</div></div>
         <span class="v">${money(a.balance)}</span></button>`;
     }).join("") + `</div>`;
   });
@@ -1992,7 +2006,7 @@ function bankTxForm(t){
 }
 function bankNudge(){
   const n = state.bankNew.length;
-  return n ? `<button class="nudge" data-goto="bank"><span class="emoji">🏦</span><span>${n} bank transaction${n===1?"":"s"} to review</span><b>Review</b></button>` : "";
+  return n ? `<div class="estline"><span><b>${n} bank transaction${n===1?"":"s"} to review</b></span><button class="linkbtn" data-goto="bank">Review</button></div>` : "";
 }
 function renderBank(){
   const c = cfg(), bk = c.bank, key = sfKey(), names = Object.entries(bk.names), anyLink = Object.values(bk.links).some(Boolean);
@@ -2006,7 +2020,7 @@ function renderBank(){
     items.forEach(b => {
       const m = bankMatch(b, used); if (m) used.add(m.id);
       const a = accts[b.acct], mk = m && c.categories.find(k=>k.id===m.cat);
-      h += `<div class="rv" data-rv="${esc(b.id)}"><div class="top"><span class="ebub emoji">${b.amt < 0 ? "💰" : "🏦"}</span>
+      h += `<div class="rv" data-rv="${esc(b.id)}"><div class="top">${a ? acctTile(a) : `<span class="itile">?</span>`}
         <div class="grow"><div class="t">${esc(niceDesc(b.desc))}</div><div class="m">${esc(new Date(b.ts).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}))}${a ? ` • <span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""}</div></div>
         <span class="v ${b.amt < 0 ? "in" : ""}">${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</span></div>
         ${m ? `<div class="match">Looks like your ${esc(m.note || (mk ? mk.name : "entry"))} entry from ${esc(new Date(m.ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}.</div>` : ""}
