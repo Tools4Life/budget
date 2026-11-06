@@ -2101,7 +2101,8 @@ function bankMatch(b, used){
   return pool.find(t => !t.bank && !used.has(t.id) && t.amt === b.amt && (!t.acct || t.acct === b.acct) && Math.abs(t.ts - bankTs(b)) <= 4*DAY_MS) || null;
 }
 /* Banks abbreviate: "DOVENMUEHLE MTG MORTG PYMT" is a mortgage, "DUKE-ENERGY" is Duke Energy. */
-const BILL_ALIAS = {mortgage:["mtg","mortg","mort","mortgage","home loan"], insurance:["ins","insur"], electric:["elec"], energy:["enrgy"], water:["wtr"], phone:["wireless","verizon","att","t-mobile","tmobile"], internet:["spectrum","xfinity","comcast","att","fiber"], car:["auto"], payment:[]};
+const BILL_ALIAS = {mortgage:["mtg","mortg","mort","mortgage","home loan"], insurance:["ins","insur"], electric:["elec"], energy:["enrgy"], water:["wtr"], phone:["wireless","verizon","att","t-mobile","tmobile"], internet:["spectrum","xfinity","comcast","att","fiber"], car:["auto"], payment:[],
+  claude:["anthropic","claude"], anthropic:["claude"], chatgpt:["openai"], openai:["chatgpt"]};
 function billNameHit(name, d){
   const toks = d.split(/[^a-z0-9]+/).filter(Boolean);
   return String(name).toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3).some(w =>
