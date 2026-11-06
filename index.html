@@ -757,6 +757,13 @@ const store = {
     if (state.mode === "db") return db.doc("tx/"+id).delete().catch(writeErr);
     const o = lsRead(); o.tx = (o.tx||[]).filter(t=>t.id!==id); lsWrite(o);
   },
+  setPaidMonth(month, map){
+    if (month === NOW) return store.setPaid(map);
+    if (state.viewMonth === month) state.viewPaid = map;
+    renderAll();
+    if (state.mode === "db") return db.doc("paid/"+month).set(map).catch(writeErr);
+    const o = lsRead(); (o.paid = o.paid||{})[month] = map; lsWrite(o);
+  },
   setPaid(map){
     state.cur.paid = map; renderAll();
     if (state.mode === "db") return enqueue("paid", () => db.doc("paid/"+NOW).set(map)).catch(writeErr);
@@ -778,6 +785,11 @@ const store = {
     renderAll();
     if (state.mode === "db"){ const {id, ...body} = nb; return db.collection("bank").doc(id).set(body).catch(writeErr); }
     const o = lsRead(); o.bank = (o.bank||[]).filter(x=>x.id!==b.id).concat([nb]); lsWrite(o);
+  },
+  /* Bank items filed as a given bill (for bills filed before the paid record kept the bank id). */
+  async bankByBill(pid){
+    if (state.mode === "db"){ const q = await db.collection("bank").where("bill","==",pid).get(); return q.docs.map(d => Object.assign({id:d.id}, d.data())); }
+    return (lsRead().bank||[]).filter(b => b.bill === pid);
   },
   async bankGet(id){
     if (state.mode === "db"){ const s = await db.doc("bank/"+id).get(); return s.exists ? Object.assign({id}, s.data()) : null; }
@@ -1222,9 +1234,9 @@ function renderActivity(){
         <div class="grow"><div class="t">${esc(t.note)}</div><div class="m">Money in${a ? ` • <span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""}</div></div>
         <span class="v" style="color:var(--good)">+${money(t.amt)}</span></button>`; return; }
       if (t.bill){ const a = accts[t.acct], cd = accts[t.cardOf];
-        html += `<div class="row billrow"><span class="ebub emoji">${esc(t.emoji)}</span>
+        html += `<button class="row billrow rowbtn" data-billrow="${esc(t.id)}" ${state.readOnly ? "disabled" : ""}><span class="ebub emoji">${esc(t.emoji)}</span>
         <div class="grow"><div class="t">${esc(t.name)}</div><div class="m">Bill paid${a ? ` • <span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""}${cd && cd !== a ? " → " + esc(cd.name) : ""}</div></div>
-        <span class="v">${money(t.amt)}</span></div>`; return; }
+        <span class="v">${money(t.amt)}</span></button>`; return; }
       const k = cats[t.cat]; const a = accts[t.acct];
       const name = k ? k.name : (t.catName || "Removed category");
       html += `<${state.readOnly?"div":"button"} class="row ${state.readOnly?"":"rowbtn"}" ${state.readOnly?"":`data-edit="${esc(t.id)}" aria-label="Edit ${esc(t.note||name)}, ${money(t.amt)}"`}><span class="ebub emoji">${esc(k ? k.emoji : "📦")}</span>
@@ -1243,6 +1255,7 @@ $("activityBody").addEventListener("click", async e => {
   if (ed){ const list = state.viewMonth === NOW ? state.cur.tx : (state.viewTx||[]); const t = list.find(x=>x.id===ed.dataset.edit); if (t) (t.bank ? bankTxForm(t) : openAdd(null, t)); return; }
   const xp = e.target.closest("[data-xpay]"); if (xp) return xpayView(xp.dataset.xpay);
   const dp = e.target.closest("[data-dep]"); if (dp) return depForm(dp.dataset.dep);
+  const br = e.target.closest("[data-billrow]"); if (br) return billPaidView(br.dataset.billrow, state.viewMonth);
   if (e.target.id === "exportCsv") exportCsv();
 });
 async function exportCsv(){
@@ -2059,7 +2072,8 @@ function bankBill(c, b, usedBills){
 function bankChoices(c, b, m, bill){
   const rule = c.bank.rules[merchKey(b.desc)] || "";
   const cats = c.categories.filter(k=>k.limit>0).concat(c.categories.filter(k=>!k.limit)).map(k => ({v:"c:"+k.id, e:k.emoji, n:k.name}));
-  const work = {v:"work", e:"🧾", n:"Work", act:true}, skip = {v:"skip", e:"↔️", n:b.amt < 0 ? "Money in" : "Transfer", act:true};
+  const onDebt = (() => { const a = c.accounts.find(x => x.id === b.acct); return a && DEBT.has(a.type); })();
+  const work = {v:"work", e:"🧾", n:"Work", act:true}, skip = b.amt < 0 && onDebt ? {v:"skip", e:"💳", n:"Card payment", act:true} : {v:"skip", e:"↔️", n:b.amt < 0 ? "Money in" : "Transfer", act:true};
   const fromAcct = c.accounts.find(a => a.id === b.acct), payCheck = b.amt < 0 && (!fromAcct || !DEBT.has(fromAcct.type)) ? [{v:"paycheck", e:"💵", n:"Paycheck", act:true}] : [];
   const looksPay = /\b(payroll|dir dep|direct dep|direct deposit|salary|paycheck)\b/i.test(String(b.desc||""));
   const billList = b.amt > 0 ? insts(c, billMonth(b)).slice().sort((p, q) => (bill && p.pid === bill.pid ? -1 : bill && q.pid === bill.pid ? 1 : 0) || p.day - q.day) : [];
@@ -2102,6 +2116,7 @@ function bankResolve(b, choice, quiet){
     if (x && billMonth(b) === NOW){
       const map = Object.assign({}, state.cur.paid);
       if (!map[pid]) map[pid] = b.ts;
+      map.__bank = Object.assign({}, map.__bank, {[pid]: b.id});
       if (x.varies || b.amt !== x.amount) map.__amt = Object.assign({}, map.__amt, {[pid]: b.amt});
       store.setPaid(map);
     }
@@ -2129,6 +2144,33 @@ function bankResolve(b, choice, quiet){
   if (work) return toast(`${money(t.amt)} work expense. Horizon owes you ${money(ensureHz(after).balance)}. Budget untouched.`);
   const rem = k.limit - (calc().spentBy[k.id]||0);
   toast(`${t.amt < 0 ? money(-t.amt) + " refund to" : money(t.amt) + " to"} ${k.name}.${k.limit && t.month === NOW ? (rem >= 0 ? " " + whole(rem) + " left." : " " + whole(-rem) + " over.") : ""}`);
+}
+/* A paid bill in Activity: undo it. If it came from Review, it goes back there to be filed again. */
+async function billPaidView(pid, month){
+  const c = cfg(), paid = month === NOW ? state.cur.paid : (state.viewPaid || {});
+  const x = insts(c, month).find(i => i.pid === pid); if (!x || !paid[pid]) return;
+  const amt = typeof (paid.__amt||{})[pid] === "number" ? paid.__amt[pid] : x.amount;
+  let bankItem = (paid.__bank||{})[pid];
+  if (!bankItem){ try{ const hits = (await store.bankByBill(pid)).filter(b => b.status === "bill" && billMonth(b) === month).sort((a, b) => b.ts - a.ts); if (hits[0]) bankItem = hits[0].id; }catch(e){} }
+  openForm({
+    title: x.name, fields:[],
+    extra:`<div class="card"><div class="sum"><span>Paid</span><b>${esc(new Date(paid[pid]).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}</b></div><div class="sum total"><span>Amount</span><b>${money(amt)}</b></div></div>`,
+    saveLabel:"Done", onSave: () => {},
+    deleteLabel: bankItem ? "Not this bill: send back to Review" : "Unmark paid",
+    onDelete: async () => {
+      const map = Object.assign({}, paid); delete map[pid];
+      ["__amt","__bank","__ack"].forEach(k => { if (map[k]){ map[k] = Object.assign({}, map[k]); delete map[k][pid]; } });
+      if (bankItem){
+        const linked = new Set(Object.values(c.bank.links).filter(Boolean));
+        if (x.cardOf && !linked.has(x.cardOf)) editCfg(y => moveBal(y, x.cardOf, amt));   // undo the paydown on an unlinked card/loan
+        store.setPaidMonth(month, map);
+        const b = await store.bankGet(bankItem); if (b) store.bankSet(b, {status:"new"});
+        return toast(`${x.name} unmarked. The bank item is back in Review.`);
+      }
+      if (month === NOW) return setBillPaid(pid, false);
+      store.setPaidMonth(month, map); toast(`${x.name} unmarked.`);
+    }
+  });
 }
 /* A paycheck from the bank: ask how much of it was the Horizon reimbursement line, so Owed by Horizon goes down by that. */
 function paycheckForm(b, key){
