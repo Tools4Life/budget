@@ -699,7 +699,7 @@ function normBank(b){
   b = b || {};
   const rules = Object.assign({}, b.rules);
   ["authorized on","authorized","purchase authorized","return authorized","on"].forEach(k => delete rules[k]);  // learned from bank boilerplate before cleanDesc existed
-  return {from: b.from || "", links: Object.assign({}, b.links), names: Object.assign({}, b.names), rules, tally: Object.assign({}, b.tally), lastSync: b.lastSync || 0};
+  return {from: b.from || "", links: Object.assign({}, b.links), names: Object.assign({}, b.names), rules, alias: Object.assign({}, b.alias), tally: Object.assign({}, b.tally), lastSync: b.lastSync || 0};
 }
 
 const NOW = monthKey(new Date());
@@ -1374,8 +1374,8 @@ function renderActivity(){
         <span class="v">${money(t.amt)}</span></button>`; return; }
       const k = cats[t.cat]; const a = accts[t.acct];
       const name = k ? k.name : (t.catName || "Removed category");
-      html += `<${state.readOnly?"div":"button"} class="row ${state.readOnly?"":"rowbtn"}" ${state.readOnly?"":`data-edit="${esc(t.id)}" aria-label="Edit ${esc(t.note ? shortDesc(t.note) : name)}, ${money(t.amt)}"`}><span class="ebub emoji">${esc(k ? k.emoji : "📦")}</span>
-        <div class="grow"><div class="t">${esc(t.note ? shortDesc(t.note) : name)}${t.work ? '<span class="tag">Work</span>' : ""}</div><div class="m">${[t.note ? esc(name) : "", a ? `<span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""].filter(Boolean).join(" • ")}</div></div>
+      html += `<${state.readOnly?"div":"button"} class="row ${state.readOnly?"":"rowbtn"}" ${state.readOnly?"":`data-edit="${esc(t.id)}" aria-label="Edit ${esc(t.note ? txName(t.note) : name)}, ${money(t.amt)}"`}><span class="ebub emoji">${esc(k ? k.emoji : "📦")}</span>
+        <div class="grow"><div class="t">${esc(t.note ? txName(t.note) : name)}${t.work ? '<span class="tag">Work</span>' : ""}</div><div class="m">${[t.note ? esc(name) : "", a ? `<span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""].filter(Boolean).join(" • ")}</div></div>
         <span class="v">${money(t.amt)}</span>
       </${state.readOnly?"div":"button"}>`;
     });
@@ -2160,6 +2160,8 @@ const merchKey = d => cleanDesc(d).toLowerCase().replace(/[^a-z& ]+/g," ").repla
 const niceDesc = d => cleanDesc(d).slice(0,60);
 /* Display name for a bank line: drop store numbers, reference codes and the trailing "CITY ST", then Title Case. */
 const ST = new Set("AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC".split(" "));
+/* Names you've set for a merchant ("Show as") win over the cleaned-up bank text. */
+const txName = d => { const a = (cfg().bank || {}).alias || {}; return a[merchKey(d)] || shortDesc(d); };
 function shortDesc(d){
   let w = cleanDesc(d).replace(/\*[A-Z0-9]{3,}\b/gi," ").replace(/#\s?\d+/g," ").replace(/\b\d{4,}\b/g," ").replace(/\s{2,}/g," ").trim().split(" ");
   if (w.length > 2 && ST.has(w[w.length-1].toUpperCase())) w = w.slice(0, -2);
@@ -2493,8 +2495,9 @@ function bankTxForm(t){
   if (state.readOnly) return toast("View only.");
   const c = cfg(), a = c.accounts.find(x=>x.id===t.acct);
   openForm({
-    title: t.note || "Bank transaction",
+    title: t.note ? txName(t.note) : "Bank transaction",
     fields:[
+      {k:"alias", type:"text", label:"Show as", value: t.note ? txName(t.note) : "", placeholder: t.note ? shortDesc(t.note) : ""},
       {k:"cat", type:"catpick", label:"Category", options:c.categories.map(k=>[k.id,k.emoji,k.name]), value:t.cat},
       {k:"kind", type:"seg", label:"Who pays", options:[["personal","Personal"],["work","Work (reimbursed)"]], value:t.work ? "work" : "personal"}],
     extra:`<div class="fhelp">${t.amt < 0 ? "+" + money(-t.amt) : money(t.amt)} on ${esc(new Date(t.ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}${a ? " • " + esc(a.name) : ""}${ib("Imported from your bank, so the amount and date stay as the bank has them.")}</div>`,
@@ -2502,7 +2505,9 @@ function bankTxForm(t){
     onSave: v => {
       const k = c.categories.find(x=>x.id===v.cat); if (!k) return "Pick a category.";
       const nt = Object.assign({}, t, {cat:k.id, catName:k.name, work:v.kind === "work" || isWorkCat(k)}), key = merchKey(t.note);
-      editCfg(x => { applyTx(x, t, -1); applyTx(x, nt, 1); learn(x, key, nt.work ? "@work" : k.id, t.work ? "@work" : t.cat); });
+      const nm = String(v.alias||"").trim().slice(0,40);
+      editCfg(x => { applyTx(x, t, -1); applyTx(x, nt, 1); learn(x, key, nt.work ? "@work" : k.id, t.work ? "@work" : t.cat);
+        if (key){ x.bank.alias = x.bank.alias || {}; if (nm && nm !== shortDesc(t.note)) x.bank.alias[key] = nm; else delete x.bank.alias[key]; } });
       store.updTx(nt); toast("Updated.");
     },
     deleteLabel:"Send back to review",
@@ -2550,7 +2555,7 @@ function renderBank(){
         const bl = x.bill, done = bl && paidNow[bl.pid];
         return `<button data-pick="${esc(x.v)}" ${dis}><span class="dtile" style="width:32px;height:32px;border-radius:10px"><small>${esc(new Date(2000, (+billMonth(b).slice(5)) - 1, 1).toLocaleDateString("en-US",{month:"short"}))}</small><b style="font-size:.85rem">${bl ? bl.day : ""}</b></span><span>${esc(x.n)}<small class="rvsub">${bl ? money(billAmt(bl)) : ""}${done ? " • already checked off" : ""}</small></span></button>`; };
       const g = state.rvMenu, payOpen = g && groups[g] && groups[g].length > 1 ? `<div class="rvpay">${groups[g].map(item).join("")}</div>` : "";
-      const name = cleanDesc(b.desc), showRaw = name.toLowerCase() !== String(b.desc).replace(/\s{2,}/g," ").trim().toLowerCase();
+      const name = txName(b.desc), showRaw = name.toLowerCase() !== String(b.desc).replace(/\s{2,}/g," ").trim().toLowerCase();
       h += `<div class="rv one" data-rv="${esc(b.id)}">
         <div class="rvamt ${b.amt < 0 ? "in" : ""}">${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</div>
         <div class="rvname">${esc(name)}</div>
@@ -2575,7 +2580,7 @@ function renderBank(){
       const rf = state.rf;
       if (!rf) h += `<div class="list"><div class="empty">Loading…</div></div>`;
       else if (!rf.length) h += `<div class="list"><div class="empty">Nothing filed yet.</div></div>`;
-      else h += `<div class="list">` + rf.slice(0, 80).map(b => { const a = accts[b.acct]; return `<button class="row" data-rf="${esc(b.id)}" ${state.readOnly ? "disabled" : ""}>${a ? acctTile(a) : `<span class="itile">?</span>`}<div class="grow"><div class="t">${esc(shortDesc(b.desc))}</div><div class="m">${esc(new Date(bankTs(b)).toLocaleDateString("en-US",{month:"short",day:"numeric"}))} • ${esc(filedLabel(c, b))}</div></div><span class="v ${b.amt < 0 ? "in" : ""}" style="${b.amt < 0 ? "color:var(--good)" : ""}">${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</span></button>`; }).join("") + `</div>`;
+      else h += `<div class="list">` + rf.slice(0, 80).map(b => { const a = accts[b.acct]; return `<button class="row" data-rf="${esc(b.id)}" ${state.readOnly ? "disabled" : ""}>${a ? acctTile(a) : `<span class="itile">?</span>`}<div class="grow"><div class="t">${esc(txName(b.desc))}</div><div class="m">${esc(new Date(bankTs(b)).toLocaleDateString("en-US",{month:"short",day:"numeric"}))} • ${esc(filedLabel(c, b))}</div></div><span class="v ${b.amt < 0 ? "in" : ""}" style="${b.amt < 0 ? "color:var(--good)" : ""}">${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</span></button>`; }).join("") + `</div>`;
     }
   }
   h += `<div style="height:28px"></div>`;
@@ -2678,7 +2683,7 @@ async function bankClick(e){
   if (id === "rfToggle"){ state.rfOpen = !state.rfOpen; state.rf = null; renderBankUI(); if (state.rfOpen) loadFiled(); return; }
   const rfb = e.target.closest("[data-rf]"); if (rfb){
     const b = (state.rf||[]).find(x => x.id === rfb.dataset.rf); if (!b) return;
-    return openForm({title: niceDesc(b.desc), fields:[], extra:`<div class="card"><div class="sum"><span>Filed as</span><b>${esc(filedLabel(cfg(), b))}</b></div><div class="sum total"><span>Amount</span><b>${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</b></div></div>`,
+    return openForm({title: txName(b.desc), fields:[], extra:`<div class="card"><div class="sum"><span>Filed as</span><b>${esc(filedLabel(cfg(), b))}</b></div><div class="sum total"><span>Amount</span><b>${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</b></div></div>`,
       saveLabel:"Done", onSave: () => {}, deleteLabel:"Send back to Review",
       onDelete: async () => { await bankUndo(b); state.rf = (state.rf||[]).filter(x => x.id !== b.id); toast("Back in Review."); renderBankUI(); }});
   }
