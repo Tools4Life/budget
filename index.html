@@ -171,6 +171,10 @@ h2 small{font-weight:500;color:var(--muted);font-size:.88rem}
 .row:first-child{border-top:0}
 .grow{flex:1;min-width:0}
 .t{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sstats{display:flex;gap:8px;margin:-2px 0 14px}
+.sstats>div{flex:1;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:9px 12px;box-shadow:var(--lift,none)}
+.sstats small{display:block;color:var(--muted);font-size:.74rem;font-weight:600}
+.sstats b{display:block;font-size:1rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 .m{color:var(--muted);font-size:.84rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .v{font-weight:700;white-space:nowrap}
 .ebub{width:42px;height:42px;border-radius:14px;background:var(--surface);display:grid;place-items:center;font-size:1.35rem;flex:none}
@@ -1346,7 +1350,9 @@ function renderActivity(){
   const total = txs.reduce((a,t)=>a+(t.work?0:t.amt),0), workTot = txs.reduce((a,t)=>a+(t.work?t.amt:0),0);
   const label = keyToDate(state.viewMonth).toLocaleString("en-US",{month:"long",year:"numeric"});
   let html = `<div class="monthnav"><button data-m="-1" aria-label="Previous month">‹</button><div>${label}</div><button data-m="1" aria-label="Next month" ${isNow?"disabled":""}>›</button></div>`;
-  html += `<h2 style="margin-top:14px">${h2t("Spending", "Tap a purchase to edit or delete it. Gray rows are bills, card payments and money in; bills are changed on Bills.")} <small>${txs.length ? money(total) + " spent" + (workTot ? " • " + money(workTot) + " work" : "") : ""}${billTot ? (txs.length ? " • " : "") + money(billTot) + " bills" : ""}</small></h2>`;
+  html += `<h2 style="margin-top:14px">${h2t("Spending", "Tap a purchase to edit or delete it. Gray rows are bills, card payments and money in; bills are changed on Bills.")} </h2>`;
+  { const st = [["Spent", total, txs.length], ["Work", workTot, workTot], ["Bills", billTot, billTot]].filter(x => x[2]);
+    if (st.length) html += `<div class="sstats">${st.map(([l,v]) => `<div><small>${l}</small><b>${money(v)}</b></div>`).join("")}</div>`; }
   if (!list.length) html += `<div class="list"><div class="empty">Nothing logged in ${esc(label)}. ${isNow ? "Tap the blue + after each purchase." : ""}</div></div>`;
   else {
     let lastDay = null, open = false;
