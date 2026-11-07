@@ -2246,7 +2246,8 @@ function learn(y, key, v, prev){
 /* A hand-entered purchase that looks like this bank item: same amount, same card (or none), within 4 days. */
 function bankMatch(b, used){
   if (b.amt <= 0) return null;
-  const pool = state.cur.tx.concat(state.viewTx || []);
+  // include past months (loaded with History) so catching up on Sep/Oct finds what you logged by hand back then
+  const pool = state.cur.tx.concat(state.viewTx || [], ...Object.values((state.hist && state.hist.months) || {}));
   return pool.find(t => !t.bank && !used.has(t.id) && t.amt === b.amt && (!t.acct || t.acct === b.acct) && Math.abs(t.ts - bankTs(b)) <= 4*DAY_MS) || null;
 }
 /* Banks abbreviate: "DOVENMUEHLE MTG MORTG PYMT" is a mortgage, "DUKE-ENERGY" is Duke Energy. */
@@ -2476,6 +2477,7 @@ function bankNudge(){
   return n ? `<div class="estline"><span><b>${n} bank transaction${n===1?"":"s"} to review</b></span><button class="linkbtn" data-goto="bank">Review</button></div>` : "";
 }
 function renderBank(){
+  if (state.bankNew.some(b => b.month && b.month < NOW) && !state.hist.loaded && !state.hist.rvLoading){ state.hist.rvLoading = true; loadHistory().then(() => { state.hist.rvLoading = false; if (state.view === "bank") renderBank(); }); }
   const c = cfg(), bk = c.bank, key = sfKey(), names = Object.entries(bk.names), anyLink = Object.values(bk.links).some(Boolean);
   const accts = Object.fromEntries(c.accounts.map(a=>[a.id,a]));
   let h = "";
