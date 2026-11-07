@@ -438,7 +438,8 @@ dialog::backdrop{background:rgba(16,24,40,.4)}
 .rv.one{padding:20px 16px 14px;text-align:center}
 .rvamt{font-size:2.5rem;font-weight:800;letter-spacing:-.03em;line-height:1.05}
 .rvamt.in{color:var(--good)}
-.rvname{font-weight:700;font-size:1.15rem;margin-top:6px;overflow-wrap:anywhere}
+.rvname{display:block;width:100%;text-align:center;background:none;border:0;padding:0;color:inherit;font:inherit;font-weight:700;font-size:1.15rem;margin-top:6px;overflow-wrap:anywhere;cursor:pointer}
+.rvpen{color:var(--muted);font-weight:500;font-size:.9rem;margin-left:8px}
 .rvmeta{color:var(--muted);font-size:.88rem;margin-top:2px}
 .rvraw{color:var(--muted);font-size:.72rem;margin-top:6px;font-family:ui-monospace,Menlo,monospace;overflow-wrap:anywhere;opacity:.8}
 .rv.one .match{margin-top:8px}
@@ -1327,7 +1328,7 @@ $("addBtn").addEventListener("click", () => {
     if (bankish(ed.note)){ key = merchKey(ed.note); nm = note.slice(0,40); note = ed.note; }  // bank text stays; what you typed becomes the merchant's name
     const t = Object.assign({}, ed, {amt, cat:k.id, catName:k.name, note, acct:state.selAcct||"", ts, month, work: state.selKind === "work" || isWorkCat(k)});
     $("addSheet").close(); state.editTx = null; editCfg(c => { applyTx(c, ed, -1); applyTx(c, t, 1);
-      if (key){ c.bank.alias = c.bank.alias || {}; if (nm && nm !== shortDesc(ed.note)) c.bank.alias[key] = nm; else delete c.bank.alias[key]; } }); store.updTx(t); toast("Transaction updated. Balances adjusted."); return;
+      if (key) setAlias(c, key, nm, shortDesc(ed.note)); }); store.updTx(t); toast("Transaction updated. Balances adjusted."); return;
   }
   const t = {id:uid(), amt, cat:k.id, catName:k.name, note:$("noteIn").value.trim(), acct:state.selAcct||"", ts, month, work: state.selKind === "work" || isWorkCat(k)};
   $("addSheet").close();
@@ -2511,7 +2512,7 @@ function bankTxForm(t){
       const nt = Object.assign({}, t, {cat:k.id, catName:k.name, work:v.kind === "work" || isWorkCat(k)}), key = merchKey(t.note);
       const nm = String(v.alias||"").trim().slice(0,40);
       editCfg(x => { applyTx(x, t, -1); applyTx(x, nt, 1); learn(x, key, nt.work ? "@work" : k.id, t.work ? "@work" : t.cat);
-        if (key){ x.bank.alias = x.bank.alias || {}; if (nm && nm !== shortDesc(t.note)) x.bank.alias[key] = nm; else delete x.bank.alias[key]; } });
+        setAlias(x, key, nm, shortDesc(t.note)); });
       store.updTx(nt); toast("Updated.");
     },
     deleteLabel:"Send back to review",
@@ -2562,7 +2563,7 @@ function renderBank(){
       const name = txName(b.desc), showRaw = name.toLowerCase() !== String(b.desc).replace(/\s{2,}/g," ").trim().toLowerCase();
       h += `<div class="rv one" data-rv="${esc(b.id)}">
         <div class="rvamt ${b.amt < 0 ? "in" : ""}">${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</div>
-        <div class="rvname">${esc(name)}</div>
+        <button class="rvname" data-rename="${esc(b.id)}" ${dis} aria-label="Rename ${esc(name)}">${esc(name)}<span class="rvpen">✎</span></button>
         <div class="rvmeta">${esc(new Date(when).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}))}${a ? ` • <span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""}</div>
         ${showRaw ? `<div class="rvraw">${esc(b.desc)}</div>` : ""}
         ${m ? `<div class="match">Looks like your ${esc(m.note || (mk ? mk.name : "entry"))} entry from ${esc(new Date(m.ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}.</div>` : ""}
@@ -2624,13 +2625,13 @@ function bankSetupHtml(){
       h += `<div class="list">` + names.map(([id,n]) => { const a = accts[bk.links[id]]; return `<div class="row"><div class="grow"><div class="t">${esc(n.name)}</div><div class="m">${esc(n.org)}${n.org ? " • " : ""}${a ? "→ " + esc(a.name) : "Not used"}</div></div><span class="v">${money(n.bal)}</span></div>`; }).join("") + `</div>`;
     }
   }
-  const learned = Object.entries(bk.rules);
+  const learned = Object.entries(Object.assign(Object.fromEntries(Object.keys(bk.alias||{}).map(k => [k, ""])), bk.rules));
   if (learned.length){
     const tot = k => Object.values(bk.tally[k] || {}).reduce((a, n) => a + n, 0) || 1;
-    h += `<h2>${h2t("Learned stores", "What Review suggests for each store, based on what you've picked most often. Tap one to change it or forget it.")} <small><button class="sharebtn" id="lsToggle">${state.lsOpen ? "Hide" : "Show " + learned.length}</button></small></h2>`;
+    h += `<h2>${h2t("Store rules", "Each store's name and what Review suggests for it. Suggestions come from what you've picked most often. Tap one to rename it, change it or forget it.")} <small><button class="sharebtn" id="lsToggle">${state.lsOpen ? "Hide" : "Show " + learned.length}</button></small></h2>`;
     if (state.lsOpen) h += `<div class="list">` +
-      learned.sort((a, b) => tot(b[0]) - tot(a[0]) || a[0].localeCompare(b[0])).map(([k, v]) => { const n = tot(k), hit = (bk.tally[k] || {})[v] || 1, L = choiceLabel(c, v);
-        return `<button class="row" data-ls="${esc(k)}" ${state.readOnly ? "disabled" : ""}><span class="ebub emoji">${esc(L[0])}</span><div class="grow"><div class="t">${esc(k.replace(/\b\w/g, ch => ch.toUpperCase()))}</div><div class="m">${esc(L[1])}${n > 1 ? ` • ${hit} of ${n} times` : ""}</div></div></button>`; }).join("") + `</div>`;
+      learned.sort((a, b) => tot(b[0]) - tot(a[0]) || a[0].localeCompare(b[0])).map(([k, v]) => { const n = tot(k), hit = (bk.tally[k] || {})[v] || 1, L = v ? choiceLabel(c, v) : ["🏷️", "Name only"];
+        return `<button class="row" data-ls="${esc(k)}" ${state.readOnly ? "disabled" : ""}><span class="ebub emoji">${esc(L[0])}</span><div class="grow"><div class="t">${esc((bk.alias||{})[k] || k.replace(/\b\w/g, ch => ch.toUpperCase()))}</div><div class="m">${esc(L[1])}${n > 1 ? ` • ${hit} of ${n} times` : ""}</div></div></button>`; }).join("") + `</div>`;
   }
   if (key) h += `<div class="list" style="margin-top:22px">
       <button class="row" id="sfRefresh" ${state.bankBusy ? "disabled" : ""}><div class="grow"><div class="t">Refresh account list</div></div></button>
@@ -2645,16 +2646,29 @@ function choiceLabel(c, v){
   if (v.startsWith("@pay:")) return ["💸", "Paid " + (acctName(c, v.slice(5)) || "removed account")];
   const k = c.categories.find(x => x.id === v); return k ? [k.emoji, k.name] : ["📦", "Removed category"];
 }
+function setAlias(y, key, nm, auto){ if (!key) return; y.bank.alias = y.bank.alias || {}; nm = String(nm||"").trim().slice(0,40); if (nm && nm !== auto) y.bank.alias[key] = nm; else delete y.bank.alias[key]; }
+function renameForm(desc){
+  if (state.readOnly) return toast("View only.");
+  const key = merchKey(desc), auto = shortDesc(desc);
+  if (!key) return toast("Can't tell which store this is.");
+  openForm({
+    title:"Rename store",
+    fields:[{k:"nm", type:"text", label:"Always show as", value:txName(desc), placeholder:auto, help:"Applies to every charge from this store, past and future. Leave blank to go back to " + auto + "."}],
+    saveLabel:"Save",
+    onSave: v => { editCfg(y => setAlias(y, key, v.nm, auto)); toast("Saved."); }
+  });
+}
 function learnedForm(key){
   const c = cfg(), cur = c.bank.rules[key] || "";
   const opts = c.categories.map(k => [k.id, k.emoji + " " + k.name]).concat([["@work","🧾 Work"],["@skip","↔️ Transfer / not spending"],["@bill","📅 Bill"],["@paycheck","💵 Paycheck"]], c.accounts.filter(a => DEBT.has(a.type)).map(a => ["@pay:" + a.id, "💸 Paid " + a.name]));
   openForm({
     title: key.replace(/\b\w/g, ch => ch.toUpperCase()),
-    fields:[{k:"v", type:"select", label:"Suggest", options:opts, value:cur, help:"Changes the suggestion for new items from this store. Things already filed stay as they are."}],
+    fields:[{k:"nm", type:"text", label:"Show as", value:(c.bank.alias||{})[key] || "", placeholder:key.replace(/\b\w/g, ch => ch.toUpperCase())},
+      {k:"v", type:"select", label:"Suggest", options:opts, value:cur, help:"Changes the suggestion for new items from this store. Things already filed stay as they are."}],
     saveLabel:"Save",
-    onSave: v => { editCfg(y => { const n = Object.values(y.bank.tally[key] || {}).reduce((a, x) => a + x, 0) || 1; y.bank.rules[key] = v.v; y.bank.tally[key] = {[v.v]: n}; }); toast("Saved."); },
+    onSave: v => { editCfg(y => { setAlias(y, key, v.nm, ""); const n = Object.values(y.bank.tally[key] || {}).reduce((a, x) => a + x, 0) || 1; y.bank.rules[key] = v.v; y.bank.tally[key] = {[v.v]: n}; }); toast("Saved."); },
     deleteLabel:"Forget this store",
-    onDelete: () => { editCfg(y => { delete y.bank.rules[key]; delete y.bank.tally[key]; }); toast("Forgotten. It will learn again from your next pick."); }
+    onDelete: () => { editCfg(y => { delete y.bank.rules[key]; delete y.bank.tally[key]; if (y.bank.alias) delete y.bank.alias[key]; }); toast("Forgotten. It will learn again from your next pick."); }
   });
 }
 async function loadFiled(){
@@ -2692,6 +2706,7 @@ async function bankClick(e){
       onDelete: async () => { await bankUndo(b); state.rf = (state.rf||[]).filter(x => x.id !== b.id); toast("Back in Review."); renderBankUI(); }});
   }
   if (id === "lsToggle"){ state.lsOpen = !state.lsOpen; return renderBankUI(); }
+  const rn = e.target.closest("[data-rename]"); if (rn){ const b = state.bankNew.find(x => x.id === rn.dataset.rename); if (b) renameForm(b.desc); return; }
   const ls = e.target.closest("[data-ls]"); if (ls) return learnedForm(ls.dataset.ls);
   if (id === "sfBulk"){
     const todo = (state.bankPlan||[]).filter(x => x.ch[0] && x.ch[0].sug && x.ch[0].v !== "paycheck" && state.bankNew.some(n => n.id === x.b.id));

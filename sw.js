@@ -1,5 +1,5 @@
 // Lets the budget open with no signal: keeps a copy of the app files.
-const CACHE='budget-v58';
+const CACHE='budget-v59';
 const SHELL=['./','index.html','config.js','manifest.json','icon-v3-180.png','icon-v3-192.png','icon-v3-512.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
