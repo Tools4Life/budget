@@ -919,6 +919,34 @@ function closeNav(){ $("app").classList.remove("open"); $("menuBtn").setAttribut
 swipeToClose(document.querySelector(".nav"),{dir:"left",isOpen:()=>$("app").classList.contains("open"),close:closeNav});
 ["addSheet","sheet"].forEach(id=>{const d=$(id);swipeToClose(d,{dir:"down",isOpen:()=>d.open,close:()=>d.close(),instant:true})});
 $("menuBtn").addEventListener("click", openNav);
+/* Swipe in from the left edge to open the menu (phone layout). The menu follows the finger. */
+(function(){
+  const EDGE = 24, nav = document.querySelector(".nav"), scrim = $("scrim");
+  let sx = null, sy = 0, dx = 0, t0 = 0, live = false, w = 280;
+  const narrow = () => window.matchMedia("(max-width:819px)").matches;
+  document.addEventListener("touchstart", e => {
+    sx = null;
+    if (!narrow() || e.touches.length !== 1 || $("app").classList.contains("open") || document.querySelector("dialog[open]")) return;
+    const t = e.touches[0]; if (t.clientX > EDGE) return;
+    sx = t.clientX; sy = t.clientY; dx = 0; t0 = Date.now(); live = false; w = nav.getBoundingClientRect().width || 280;
+  }, {passive:true});
+  document.addEventListener("touchmove", e => {
+    if (sx == null) return;
+    const t = e.touches[0], mx = t.clientX - sx, my = t.clientY - sy;
+    if (!live){ if (Math.abs(mx) < 8 && Math.abs(my) < 8) return; if (mx <= 0 || Math.abs(my) > mx){ sx = null; return; } live = true;
+      nav.style.transition = "none"; scrim.style.display = "block"; scrim.style.position = "fixed"; scrim.style.inset = "0"; scrim.style.zIndex = "15"; scrim.style.background = "rgba(16,24,40,.35)"; }
+    if (e.cancelable) e.preventDefault();
+    dx = Math.max(0, Math.min(w, mx));
+    nav.style.transform = `translateX(${dx - w}px)`; scrim.style.opacity = (dx / w).toFixed(3);
+  }, {passive:false});
+  const end = () => {
+    if (sx == null) return; sx = null; if (!live) return; live = false;
+    const fast = dx / Math.max(1, Date.now() - t0) > .5, open = dx > w / 3 || (fast && dx > 30);
+    ["transition","transform"].forEach(k => nav.style[k] = ""); ["display","position","inset","zIndex","background","opacity"].forEach(k => scrim.style[k] = "");
+    if (open) openNav();
+  };
+  document.addEventListener("touchend", end); document.addEventListener("touchcancel", end);
+})();
 $("scrim").addEventListener("click", closeNav);
 $("navlist").addEventListener("click", e => { const b = e.target.closest("[data-go]"); if (b) go(b.dataset.go); });
 $("leftPill").addEventListener("click", () => go("home"));
@@ -2618,7 +2646,7 @@ function rvGo(d){
   const card = $("bankBody").querySelector(".rv.one"); if (card && card.getBoundingClientRect().top < 60) card.scrollIntoView({block:"start", behavior:"smooth"});
 }
 let rvSw = null;
-$("bankBody").addEventListener("touchstart", e => { rvSw = e.touches.length === 1 && e.target.closest(".rv.one") ? {x:e.touches[0].clientX, y:e.touches[0].clientY} : null; }, {passive:true});
+$("bankBody").addEventListener("touchstart", e => { rvSw = e.touches.length === 1 && e.touches[0].clientX > 24 && e.target.closest(".rv.one") ? {x:e.touches[0].clientX, y:e.touches[0].clientY} : null; }, {passive:true});
 $("bankBody").addEventListener("touchend", e => { if (!rvSw) return; const t = e.changedTouches[0], dx = t.clientX - rvSw.x, dy = t.clientY - rvSw.y; rvSw = null;
   if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) rvGo(dx < 0 ? 1 : -1); });
 document.addEventListener("keydown", e => { if (state.view !== "bank" || /input|textarea|select/i.test((e.target||{}).tagName||"")) return; if (e.key === "ArrowRight") rvGo(1); if (e.key === "ArrowLeft") rvGo(-1); });
