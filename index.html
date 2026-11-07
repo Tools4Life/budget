@@ -906,7 +906,7 @@ function go(view){
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === "v-"+view));
   document.querySelectorAll("[data-go]").forEach(b => b.toggleAttribute("aria-current", false) || (b.dataset.go===view && b.setAttribute("aria-current","page")));
   $("title").textContent = view === "home" ? keyToDate(NOW).toLocaleString("en-US",{month:"long",year:"numeric"}) : NAV.find(n=>n[0]===view)[2];
-  $("leftPill").hidden = view === "home";
+  $("leftPill").hidden = !["bank","activity"].includes(view);   // only where filing or spending moves it
   $("topAdd").setAttribute("aria-label", "Add a cash expense");
   closeNav();
   if (view === "history") loadHistory();
