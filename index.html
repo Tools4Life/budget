@@ -1368,8 +1368,8 @@ function renderActivity(){
         <span class="v">${money(t.amt)}</span></button>`; return; }
       const k = cats[t.cat]; const a = accts[t.acct];
       const name = k ? k.name : (t.catName || "Removed category");
-      html += `<${state.readOnly?"div":"button"} class="row ${state.readOnly?"":"rowbtn"}" ${state.readOnly?"":`data-edit="${esc(t.id)}" aria-label="Edit ${esc(t.note||name)}, ${money(t.amt)}"`}><span class="ebub emoji">${esc(k ? k.emoji : "📦")}</span>
-        <div class="grow"><div class="t">${esc(t.note || name)}${t.work ? '<span class="tag">Work</span>' : ""}${t.bank ? '<span class="tag btag">Bank</span>' : ""}</div><div class="m">${t.note ? esc(name)+" • " : ""}${d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}${a ? ` • <span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""}</div></div>
+      html += `<${state.readOnly?"div":"button"} class="row ${state.readOnly?"":"rowbtn"}" ${state.readOnly?"":`data-edit="${esc(t.id)}" aria-label="Edit ${esc(t.note ? shortDesc(t.note) : name)}, ${money(t.amt)}"`}><span class="ebub emoji">${esc(k ? k.emoji : "📦")}</span>
+        <div class="grow"><div class="t">${esc(t.note ? shortDesc(t.note) : name)}${t.work ? '<span class="tag">Work</span>' : ""}</div><div class="m">${[t.note ? esc(name) : "", a ? `<span class="adot" style="background:${acctColor(a)}"></span>${esc(a.name)}` : ""].filter(Boolean).join(" • ")}</div></div>
         <span class="v">${money(t.amt)}</span>
       </${state.readOnly?"div":"button"}>`;
     });
@@ -2136,7 +2136,7 @@ function bankId(acctId, txId){
    processors add "TST*", "SQ *", "SP+". Strip it so names read cleanly and stores are learned by their real name. */
 function cleanDesc(d){
   const x = String(d||"")
-    .replace(/^(recurring\s+)?(purchase|payment)\s+(return\s+)?authorized\s+on\s+\d{1,2}\/\d{1,2}\s*/i,"")
+    .replace(/^(recurring\s+)?(purchase|payment)\s+(return\s+)?authorized(\s+on)?(\s+\d{1,2}\/\d{1,2})?\s*/i,"")
     .replace(/^(pos|debit card|checkcard|check card)(\s+purchase)?(\s+\d{4})?\s*-?\s*/i,"")
     .replace(/\s+S\d{9,}\s+CARD\s+\d{4}\s*$/i,"").replace(/\s+CARD\s+\d{4}\s*$/i,"")
     .replace(/^(TST\*|SQ\s?\*|SP\+|SP\s?\*|PY\s?\*|DD\s?\*|IC\*)\s*/i,"")
@@ -2152,6 +2152,14 @@ function bankTs(b){
 }
 const merchKey = d => cleanDesc(d).toLowerCase().replace(/[^a-z& ]+/g," ").replace(/\b(pos|purchase|debit|credit|card|recurring|payment|checkcard|ach|sq|tst|pp|www|com|the)\b/g," ").trim().split(/\s+/).filter(Boolean).slice(0,2).join(" ");
 const niceDesc = d => cleanDesc(d).slice(0,60);
+/* Display name for a bank line: drop store numbers, reference codes and the trailing "CITY ST", then Title Case. */
+const ST = new Set("AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC".split(" "));
+function shortDesc(d){
+  let w = cleanDesc(d).replace(/\*[A-Z0-9]{3,}\b/gi," ").replace(/#\s?\d+/g," ").replace(/\b\d{4,}\b/g," ").replace(/\s{2,}/g," ").trim().split(" ");
+  if (w.length > 2 && ST.has(w[w.length-1].toUpperCase())) w = w.slice(0, -2);
+  const x = w.join(" ").replace(/[\s\-*.,]+$/,"").trim() || cleanDesc(d);
+  return (x === x.toUpperCase() ? x.toLowerCase().replace(/(^|[\s&\/-])([a-z])/g,(m,p,c)=>p+c.toUpperCase()) : x).slice(0,40);
+}
 
 async function sfClaim(token){
   let claim = "";
@@ -2561,7 +2569,7 @@ function renderBank(){
       const rf = state.rf;
       if (!rf) h += `<div class="list"><div class="empty">Loading…</div></div>`;
       else if (!rf.length) h += `<div class="list"><div class="empty">Nothing filed yet.</div></div>`;
-      else h += `<div class="list">` + rf.slice(0, 80).map(b => { const a = accts[b.acct]; return `<button class="row" data-rf="${esc(b.id)}" ${state.readOnly ? "disabled" : ""}>${a ? acctTile(a) : `<span class="itile">?</span>`}<div class="grow"><div class="t">${esc(niceDesc(b.desc))}</div><div class="m">${esc(new Date(bankTs(b)).toLocaleDateString("en-US",{month:"short",day:"numeric"}))} • ${esc(filedLabel(c, b))}</div></div><span class="v ${b.amt < 0 ? "in" : ""}" style="${b.amt < 0 ? "color:var(--good)" : ""}">${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</span></button>`; }).join("") + `</div>`;
+      else h += `<div class="list">` + rf.slice(0, 80).map(b => { const a = accts[b.acct]; return `<button class="row" data-rf="${esc(b.id)}" ${state.readOnly ? "disabled" : ""}>${a ? acctTile(a) : `<span class="itile">?</span>`}<div class="grow"><div class="t">${esc(shortDesc(b.desc))}</div><div class="m">${esc(new Date(bankTs(b)).toLocaleDateString("en-US",{month:"short",day:"numeric"}))} • ${esc(filedLabel(c, b))}</div></div><span class="v ${b.amt < 0 ? "in" : ""}" style="${b.amt < 0 ? "color:var(--good)" : ""}">${b.amt < 0 ? "+" + money(-b.amt) : money(b.amt)}</span></button>`; }).join("") + `</div>`;
     }
   }
   h += `<div style="height:28px"></div>`;
