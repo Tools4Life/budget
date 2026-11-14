@@ -2206,7 +2206,8 @@ async function sfAccounts(params){
   const accounts = (d.accounts||[]).map(a => {
     const cn = conns[a.conn_id] || {}, og = a.org || {};
     return {id:String(a.id), name:String(a.name||"Account"), org:String(cn.name || cn.org_name || og.name || og.domain || ""),
-      bal:Math.round(parseFloat(a.balance)*100) || 0, at:(+a["balance-date"]||0)*1000, tx:Array.isArray(a.transactions) ? a.transactions : []};
+      bal:Math.round(parseFloat(a.balance)*100) || 0,
+      avail: a["available-balance"] != null && a["available-balance"] !== "" && isFinite(parseFloat(a["available-balance"])) ? Math.round(parseFloat(a["available-balance"])*100) : null, at:(+a["balance-date"]||0)*1000, tx:Array.isArray(a.transactions) ? a.transactions : []};
   });
   const errors = (Array.isArray(d.errlist) && d.errlist.length ? d.errlist.map(e => e.msg || e.code) : (d.errors||[])).map(String);
   return {accounts, errors};
@@ -2262,7 +2263,7 @@ async function bankSync(manual){
         c.bank.names[a.id] = bankName(a.id, a);
         const ac = c.accounts.find(x => x.id === c.bank.links[a.id]);
         // Cards and loans: the app tracks what you owe as a positive number; banks report it either sign.
-        if (ac && ac.type !== "reimb"){ ac.balance = DEBT.has(ac.type) ? Math.abs(a.bal) : a.bal; ac.updated = a.at || Date.now(); }
+        if (ac && ac.type !== "reimb"){ ac.balance = DEBT.has(ac.type) ? Math.abs(a.bal) : (a.avail != null ? a.avail : a.bal); ac.updated = a.at || Date.now(); }
       });
       c.bank.lastSync = Date.now();
     });
